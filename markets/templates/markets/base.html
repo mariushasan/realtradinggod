@@ -421,6 +421,113 @@
             background: #1e3a1e;
             color: #4ade80;
         }
+
+        /* Tag filtering styles */
+        .tag-filters {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .tag-filter-section {
+            background: #151515;
+            border: 1px solid #222;
+            border-radius: 8px;
+            padding: 15px;
+        }
+
+        .tag-filter-section h3 {
+            font-size: 1rem;
+            color: #fff;
+            margin-bottom: 5px;
+        }
+
+        .filter-hint {
+            font-size: 0.8rem;
+            color: #666;
+            margin-bottom: 10px;
+        }
+
+        .tag-select-container {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .tag-checkboxes {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .tag-category {
+            margin-bottom: 12px;
+        }
+
+        .category-label {
+            display: block;
+            font-size: 0.85rem;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+            padding-bottom: 4px;
+            border-bottom: 1px solid #333;
+        }
+
+        .category-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .tag-checkbox {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            background: #222;
+            border: 1px solid #333;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+        }
+
+        .tag-checkbox:hover {
+            background: #2a2a2a;
+            border-color: #444;
+        }
+
+        .tag-checkbox input[type="checkbox"] {
+            width: 14px;
+            height: 14px;
+            accent-color: #2563eb;
+        }
+
+        .tag-checkbox input[type="checkbox"]:checked + .tag-label {
+            color: #60a5fa;
+        }
+
+        .tag-label {
+            color: #e0e0e0;
+        }
+
+        .tag-count {
+            color: #666;
+            font-size: 0.75rem;
+        }
+
+        .no-tags {
+            color: #666;
+            font-style: italic;
+        }
+
+        @media (max-width: 768px) {
+            .tag-filters {
+                grid-template-columns: 1fr;
+            }
+        }
     </style>
 </head>
 <body>

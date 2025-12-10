@@ -99,13 +99,14 @@ class KalshiClient:
 
         raise last_error
 
-    def get_events(self, status: str = 'open', limit: int = 200, cursor: str = None, with_nested_markets: bool = True) -> dict:
+    def get_events(self, status: str = 'open', limit: int = 200, cursor: str = None, with_nested_markets: bool = True, series_ticker: str = None) -> dict:
         """Get events from Kalshi"""
         params = {
             'status': status,
             'limit': limit,
             'cursor': cursor,
-            'with_nested_markets': str(with_nested_markets).lower()
+            'with_nested_markets': str(with_nested_markets).lower(),
+            'series_ticker': series_ticker
         }
         return self._request('GET', '/events', params)
 
@@ -144,13 +145,18 @@ class KalshiClient:
 
         return all_markets
 
-    def get_all_open_events(self) -> list:
-        """Fetch all open events with pagination"""
+    def get_all_open_events(self, series_ticker: str = None) -> list:
+        """Fetch all open events with pagination, optionally filtered by series ticker"""
         all_events = []
         cursor = None
 
         while True:
-            response = self.get_events(status='open', cursor=cursor, with_nested_markets=True)
+            response = self.get_events(
+                status='open',
+                cursor=cursor,
+                with_nested_markets=True,
+                series_ticker=series_ticker
+            )
             events = response.get('events', [])
             all_events.extend(events)
 
@@ -159,3 +165,7 @@ class KalshiClient:
                 break
 
         return all_events
+
+    def get_tags_by_categories(self) -> dict:
+        """Get all tags organized by categories"""
+        return self._request('GET', '/search/tags_by_categories')

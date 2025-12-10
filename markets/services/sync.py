@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Dict
+from typing import List, Dict, Optional
 import logging
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -19,12 +19,41 @@ class MarketSyncService:
         self.kalshi_client = KalshiClient()
         self.poly_client = PolymarketClient()
 
-    def sync_kalshi_markets(self) -> List[Market]:
-        """Sync markets from Kalshi"""
+    def get_kalshi_tags(self) -> dict:
+        """Get available Kalshi tags organized by categories"""
+        try:
+            response = self.kalshi_client.get_tags_by_categories()
+            return response.get('tags_by_categories', {})
+        except Exception as e:
+            logger.error(f"Error fetching Kalshi tags: {e}")
+            return {}
+
+    def get_polymarket_tags(self) -> list:
+        """Get available Polymarket tags"""
+        try:
+            return self.poly_client.get_tags()
+        except Exception as e:
+            logger.error(f"Error fetching Polymarket tags: {e}")
+            return []
+
+    def sync_kalshi_markets(self, series_tickers: Optional[List[str]] = None) -> List[Market]:
+        """Sync markets from Kalshi, optionally filtered by series tickers (tags)"""
         synced = []
 
         try:
-            events = self.kalshi_client.get_all_open_events()
+            # If series_tickers provided, fetch events for each series
+            if series_tickers:
+                events = []
+                seen_event_tickers = set()
+                for series_ticker in series_tickers:
+                    series_events = self.kalshi_client.get_all_open_events(series_ticker=series_ticker)
+                    for event in series_events:
+                        event_ticker = event.get('event_ticker', '')
+                        if event_ticker not in seen_event_tickers:
+                            events.append(event)
+                            seen_event_tickers.add(event_ticker)
+            else:
+                events = self.kalshi_client.get_all_open_events()
 
             for event in events:
                 event_ticker = event.get('event_ticker', '')
@@ -86,12 +115,24 @@ class MarketSyncService:
 
         return synced
 
-    def sync_polymarket_markets(self) -> List[Market]:
-        """Sync markets from Polymarket"""
+    def sync_polymarket_markets(self, tag_ids: Optional[List[int]] = None) -> List[Market]:
+        """Sync markets from Polymarket, optionally filtered by tag IDs"""
         synced = []
 
         try:
-            markets_data = self.poly_client.get_all_active_markets()
+            # If tag_ids provided, fetch markets for each tag
+            if tag_ids:
+                markets_data = []
+                seen_condition_ids = set()
+                for tag_id in tag_ids:
+                    tag_markets = self.poly_client.get_all_active_markets(tag_id=tag_id)
+                    for market in tag_markets:
+                        condition_id = market.get('conditionId', market.get('condition_id', ''))
+                        if condition_id and condition_id not in seen_condition_ids:
+                            markets_data.append(market)
+                            seen_condition_ids.add(condition_id)
+            else:
+                markets_data = self.poly_client.get_all_active_markets()
 
             for market_data in markets_data:
                 condition_id = market_data.get('conditionId', market_data.get('condition_id', ''))
@@ -174,8 +215,12 @@ class MarketSyncService:
 
         return synced
 
-    def sync_all(self) -> Dict[str, List[Market]]:
-        """Sync markets from all exchanges in parallel"""
+    def sync_all(
+        self,
+        kalshi_series_tickers: Optional[List[str]] = None,
+        polymarket_tag_ids: Optional[List[int]] = None
+    ) -> Dict[str, List[Market]]:
+        """Sync markets from all exchanges in parallel, with optional tag filtering"""
         results = {
             'kalshi': [],
             'polymarket': []
@@ -184,8 +229,8 @@ class MarketSyncService:
         # Run both syncs in parallel
         with ThreadPoolExecutor(max_workers=2) as executor:
             futures = {
-                executor.submit(self.sync_kalshi_markets): 'kalshi',
-                executor.submit(self.sync_polymarket_markets): 'polymarket'
+                executor.submit(self.sync_kalshi_markets, kalshi_series_tickers): 'kalshi',
+                executor.submit(self.sync_polymarket_markets, polymarket_tag_ids): 'polymarket'
             }
 
             for future in as_completed(futures):

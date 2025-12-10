@@ -23,6 +23,35 @@
 </div>
 
 <div class="section-header">
+    <h2>Sync Markets</h2>
+    <button class="btn" onclick="loadTags()" id="loadTagsBtn">
+        Load Tags
+        <span class="loading" id="loadTagsLoading">...</span>
+    </button>
+</div>
+
+<div class="tag-filters">
+    <div class="tag-filter-section">
+        <h3>Kalshi Tags</h3>
+        <p class="filter-hint">No tags selected = fetch all markets</p>
+        <div class="tag-select-container" id="kalshiTagsContainer">
+            <div class="tag-checkboxes" id="kalshiTags">
+                <span class="no-tags">Click "Load Tags" to see available tags</span>
+            </div>
+        </div>
+    </div>
+    <div class="tag-filter-section">
+        <h3>Polymarket Tags</h3>
+        <p class="filter-hint">No tags selected = fetch all markets</p>
+        <div class="tag-select-container" id="polymarketTagsContainer">
+            <div class="tag-checkboxes" id="polymarketTags">
+                <span class="no-tags">Click "Load Tags" to see available tags</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="section-header">
     <h2>Actions</h2>
     <div>
         <button class="btn primary" onclick="syncMarkets()" id="syncBtn">
@@ -164,6 +193,7 @@
 {% block scripts %}
 <script>
     const currentSort = '{{ current_sort }}';
+    let tagsLoaded = false;
 
     function sortBy(column) {
         let newSort = column;
@@ -177,6 +207,98 @@
         window.location.href = '?sort=' + newSort;
     }
 
+    async function loadTags() {
+        const btn = document.getElementById('loadTagsBtn');
+        const loading = document.getElementById('loadTagsLoading');
+
+        btn.disabled = true;
+        loading.style.display = 'inline';
+
+        try {
+            const response = await fetch('{% url "markets:get_tags" %}');
+            const data = await response.json();
+
+            if (data.success) {
+                renderKalshiTags(data.kalshi);
+                renderPolymarketTags(data.polymarket);
+                tagsLoaded = true;
+                showToast(`Loaded ${data.kalshi.length} Kalshi tags, ${data.polymarket.length} Polymarket tags`);
+            } else {
+                showToast('Error loading tags: ' + data.error, 'error');
+            }
+        } catch (e) {
+            showToast('Network error: ' + e.message, 'error');
+        } finally {
+            btn.disabled = false;
+            loading.style.display = 'none';
+        }
+    }
+
+    function renderKalshiTags(tags) {
+        const container = document.getElementById('kalshiTags');
+        if (!tags || tags.length === 0) {
+            container.innerHTML = '<span class="no-tags">No tags available</span>';
+            return;
+        }
+
+        // Group tags by category
+        const byCategory = {};
+        tags.forEach(tag => {
+            const cat = tag.category || 'Other';
+            if (!byCategory[cat]) byCategory[cat] = [];
+            byCategory[cat].push(tag);
+        });
+
+        let html = '';
+        for (const [category, categoryTags] of Object.entries(byCategory)) {
+            html += `<div class="tag-category">
+                <span class="category-label">${category}</span>
+                <div class="category-tags">`;
+            categoryTags.forEach(tag => {
+                html += `<label class="tag-checkbox">
+                    <input type="checkbox" name="kalshi_tag" value="${tag.id}">
+                    <span class="tag-label">${tag.label}</span>
+                    <span class="tag-count">(${tag.count})</span>
+                </label>`;
+            });
+            html += '</div></div>';
+        }
+        container.innerHTML = html;
+    }
+
+    function renderPolymarketTags(tags) {
+        const container = document.getElementById('polymarketTags');
+        if (!tags || tags.length === 0) {
+            container.innerHTML = '<span class="no-tags">No tags available</span>';
+            return;
+        }
+
+        let html = '<div class="category-tags">';
+        tags.forEach(tag => {
+            html += `<label class="tag-checkbox">
+                <input type="checkbox" name="polymarket_tag" value="${tag.id}">
+                <span class="tag-label">${tag.label}</span>
+            </label>`;
+        });
+        html += '</div>';
+        container.innerHTML = html;
+    }
+
+    function getSelectedTags() {
+        const kalshiTags = [];
+        const polymarketTags = [];
+
+        document.querySelectorAll('input[name="kalshi_tag"]:checked').forEach(cb => {
+            kalshiTags.push(cb.value);
+        });
+
+        document.querySelectorAll('input[name="polymarket_tag"]:checked').forEach(cb => {
+            polymarketTags.push(cb.value);
+        });
+
+        return { kalshiTags, polymarketTags };
+    }
+
     async function syncMarkets() {
         const btn = document.getElementById('syncBtn');
         const loading = document.getElementById('syncLoading');
@@ -185,17 +307,33 @@
         loading.style.display = 'inline';
 
         try {
+            const { kalshiTags, polymarketTags } = getSelectedTags();
+
+            const body = {};
+            if (kalshiTags.length > 0) {
+                body.kalshi_tags = kalshiTags;
+            }
+            if (polymarketTags.length > 0) {
+                body.polymarket_tags = polymarketTags;
+            }
+
             const response = await fetch('{% url "markets:sync_markets" %}', {
                 method: 'POST',
                 headers: {
                     'X-CSRFToken': getCookie('csrftoken'),
-                }
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(body)
             });
 
             const data = await response.json();
 
             if (data.success) {
-                showToast(`Synced: ${data.kalshi_synced} Kalshi, ${data.polymarket_synced} Polymarket markets`);
+                let msg = `Synced: ${data.kalshi_synced} Kalshi, ${data.polymarket_synced} Polymarket markets`;
+                if (kalshiTags.length > 0 || polymarketTags.length > 0) {
+                    msg += ' (filtered by tags)';
+                }
+                showToast(msg);
                 setTimeout(() => location.reload(), 1500);
             } else {
                 showToast('Error: ' + data.error, 'error');

@@ -1,3 +1,5 @@
+import json
+
 from django.shortcuts import render, redirect, get_object_or_404
 from django.http import JsonResponse
 from django.views import View
@@ -148,12 +150,34 @@ class MatchesListView(View):
 
 @csrf_exempt
 def sync_markets(request):
-    """Sync markets from exchanges (fetch and save only)"""
+    """Sync markets from exchanges (fetch and save only), with optional tag filtering"""
     if request.method == 'POST':
         sync_service = MarketSyncService()
 
         try:
-            results = sync_service.sync_all()
+            # Parse request body for tag filters
+            kalshi_series_tickers = None
+            polymarket_tag_ids = None
+
+            if request.body:
+                try:
+                    data = json.loads(request.body)
+                    # Kalshi: list of series tickers (tag slugs)
+                    kalshi_tags = data.get('kalshi_tags', [])
+                    if kalshi_tags:
+                        kalshi_series_tickers = kalshi_tags
+
+                    # Polymarket: list of tag IDs
+                    poly_tags = data.get('polymarket_tags', [])
+                    if poly_tags:
+                        polymarket_tag_ids = [int(t) for t in poly_tags]
+                except (json.JSONDecodeError, ValueError):
+                    pass
+
+            results = sync_service.sync_all(
+                kalshi_series_tickers=kalshi_series_tickers,
+                polymarket_tag_ids=polymarket_tag_ids
+            )
 
             return JsonResponse({
                 'success': True,
@@ -168,6 +192,53 @@ def sync_markets(request):
             }, status=500)
 
     return JsonResponse({'error': 'POST required'}, status=405)
+
+
+@csrf_exempt
+def get_tags(request):
+    """Get available tags from both exchanges"""
+    if request.method == 'GET':
+        sync_service = MarketSyncService()
+
+        try:
+            kalshi_tags = sync_service.get_kalshi_tags()
+            polymarket_tags = sync_service.get_polymarket_tags()
+
+            # Format Kalshi tags: flatten categories into a list with category info
+            kalshi_formatted = []
+            for category, tags in kalshi_tags.items():
+                for tag in tags:
+                    kalshi_formatted.append({
+                        'id': tag.get('tag', ''),
+                        'label': tag.get('label', ''),
+                        'category': category,
+                        'count': tag.get('count', 0)
+                    })
+
+            # Format Polymarket tags
+            polymarket_formatted = []
+            if isinstance(polymarket_tags, list):
+                for tag in polymarket_tags:
+                    if not tag.get('forceHide', False):
+                        polymarket_formatted.append({
+                            'id': tag.get('id', ''),
+                            'label': tag.get('label', ''),
+                            'slug': tag.get('slug', '')
+                        })
+
+            return JsonResponse({
+                'success': True,
+                'kalshi': kalshi_formatted,
+                'polymarket': polymarket_formatted
+            })
+
+        except Exception as e:
+            return JsonResponse({
+                'success': False,
+                'error': str(e)
+            }, status=500)
+
+    return JsonResponse({'error': 'GET required'}, status=405)
 
 
 @csrf_exempt

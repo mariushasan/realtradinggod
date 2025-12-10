@@ -98,7 +98,7 @@ class PolymarketClient:
 
         raise last_error
 
-    def get_markets(self, offset: int = 0, limit: int = 100, active: bool = True) -> list:
+    def get_markets(self, offset: int = 0, limit: int = 100, active: bool = True, tag_id: int = None) -> list:
         """Get markets from Gamma API"""
         params = {
             'limit': limit,
@@ -106,6 +106,8 @@ class PolymarketClient:
             'active': str(active).lower(),
             'closed': 'false'
         }
+        if tag_id is not None:
+            params['tag_id'] = tag_id
         return self._gamma_request('/markets', params)
 
     def get_market(self, condition_id: str) -> dict:
@@ -144,15 +146,15 @@ class PolymarketClient:
         """Get order book for a token"""
         return self._clob_request('GET', '/book', {'token_id': token_id})
 
-    def get_all_active_markets(self) -> list:
-        """Fetch all active markets with offset-based pagination"""
+    def get_all_active_markets(self, tag_id: int = None) -> list:
+        """Fetch all active markets with offset-based pagination, optionally filtered by tag"""
         all_markets = []
         offset = 0
         limit = 100
 
         while True:
             try:
-                response = self.get_markets(offset=offset, limit=limit, active=True)
+                response = self.get_markets(offset=offset, limit=limit, active=True, tag_id=tag_id)
             except Exception as e:
                 logger.error(f"Failed to fetch markets at offset {offset}: {e}")
                 break
@@ -214,3 +216,8 @@ class PolymarketClient:
             offset += limit
 
         return all_events
+
+    def get_tags(self, limit: int = 100) -> list:
+        """Get all available tags"""
+        params = {'limit': limit}
+        return self._gamma_request('/tags', params)
