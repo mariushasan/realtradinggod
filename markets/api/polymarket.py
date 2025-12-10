@@ -98,30 +98,28 @@ class PolymarketClient:
 
         raise last_error
 
-    def get_markets(self, next_cursor: str = None, limit: int = 100, active: bool = True) -> list:
+    def get_markets(self, offset: int = 0, limit: int = 100, active: bool = True) -> list:
         """Get markets from Gamma API"""
         params = {
             'limit': limit,
+            'offset': offset,
             'active': str(active).lower(),
             'closed': 'false'
         }
-        if next_cursor:
-            params['next_cursor'] = next_cursor
         return self._gamma_request('/markets', params)
 
     def get_market(self, condition_id: str) -> dict:
         """Get single market by condition ID from Gamma API"""
         return self._gamma_request(f'/markets/{condition_id}')
 
-    def get_events(self, next_cursor: str = None, limit: int = 100, active: bool = True) -> list:
+    def get_events(self, offset: int = 0, limit: int = 100, active: bool = True) -> list:
         """Get events from Gamma API"""
         params = {
             'limit': limit,
+            'offset': offset,
             'active': str(active).lower(),
             'closed': 'false'
         }
-        if next_cursor:
-            params['next_cursor'] = next_cursor
         return self._gamma_request('/events', params)
 
     def get_event(self, event_slug: str) -> dict:
@@ -147,58 +145,72 @@ class PolymarketClient:
         return self._clob_request('GET', '/book', {'token_id': token_id})
 
     def get_all_active_markets(self) -> list:
-        """Fetch all active markets with pagination"""
+        """Fetch all active markets with offset-based pagination"""
         all_markets = []
-        next_cursor = None
+        offset = 0
+        limit = 100
 
         while True:
             try:
-                response = self.get_markets(next_cursor=next_cursor, active=True)
+                response = self.get_markets(offset=offset, limit=limit, active=True)
             except Exception as e:
-                logger.error(f"Failed to fetch markets: {e}")
+                logger.error(f"Failed to fetch markets at offset {offset}: {e}")
                 break
 
             # Handle both list and dict responses
             if isinstance(response, list):
                 markets = response
-                next_cursor = None
-            else:
-                markets = response if isinstance(response, list) else response.get('data', response)
+            elif isinstance(response, dict):
+                markets = response.get('data', [])
                 if isinstance(markets, dict):
                     markets = [markets]
-                next_cursor = response.get('next_cursor') if isinstance(response, dict) else None
+            else:
+                markets = []
+
+            if not markets:
+                break
 
             all_markets.extend(markets)
+            logger.info(f"Fetched {len(markets)} Polymarket markets (total: {len(all_markets)})")
 
-            if not next_cursor or not markets:
+            # If we got fewer than limit, we've reached the end
+            if len(markets) < limit:
                 break
+
+            offset += limit
 
         return all_markets
 
     def get_all_active_events(self) -> list:
-        """Fetch all active events with pagination"""
+        """Fetch all active events with offset-based pagination"""
         all_events = []
-        next_cursor = None
+        offset = 0
+        limit = 100
 
         while True:
             try:
-                response = self.get_events(next_cursor=next_cursor, active=True)
+                response = self.get_events(offset=offset, limit=limit, active=True)
             except Exception as e:
-                logger.error(f"Failed to fetch events: {e}")
+                logger.error(f"Failed to fetch events at offset {offset}: {e}")
                 break
 
             if isinstance(response, list):
                 events = response
-                next_cursor = None
-            else:
-                events = response if isinstance(response, list) else response.get('data', response)
+            elif isinstance(response, dict):
+                events = response.get('data', [])
                 if isinstance(events, dict):
                     events = [events]
-                next_cursor = response.get('next_cursor') if isinstance(response, dict) else None
+            else:
+                events = []
+
+            if not events:
+                break
 
             all_events.extend(events)
 
-            if not next_cursor or not events:
+            if len(events) < limit:
                 break
+
+            offset += limit
 
         return all_events

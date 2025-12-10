@@ -36,24 +36,30 @@
     </div>
 </div>
 
-{% if cross_exchange %}
 <div class="section-header">
-    <h2>Cross-Exchange Opportunities</h2>
+    <h2>All Arbitrage Opportunities</h2>
+    <span class="page-info">{{ total_opportunities }} total</span>
 </div>
+
+{% if opportunities %}
 <table>
     <thead>
         <tr>
             <th>Kalshi Market</th>
             <th>Polymarket Market</th>
             <th>Positions</th>
-            <th>Profit %</th>
-            <th>EV</th>
-            <th>Match Status</th>
+            <th class="sortable {% if current_sort == 'profit_percent' %}asc{% elif current_sort == '-profit_percent' %}desc{% endif %}"
+                onclick="sortBy('profit_percent')">Profit %</th>
+            <th class="sortable {% if current_sort == 'expected_value' %}asc{% elif current_sort == '-expected_value' %}desc{% endif %}"
+                onclick="sortBy('expected_value')">EV</th>
+            <th class="sortable {% if current_sort == 'arb_type' %}asc{% elif current_sort == '-arb_type' %}desc{% endif %}"
+                onclick="sortBy('arb_type')">Type</th>
         </tr>
     </thead>
     <tbody>
-        {% for opp in cross_exchange %}
+        {% for opp in opportunities %}
         <tr>
+            {% if opp.arb_type == 'cross_exchange' %}
             <td>
                 <a href="{{ opp.market_match.kalshi_market.url }}" target="_blank">
                     {{ opp.market_match.kalshi_market.title|truncatechars:50 }}
@@ -64,10 +70,35 @@
                     {{ opp.market_match.polymarket_market.title|truncatechars:50 }}
                 </a>
             </td>
+            {% elif opp.arb_type == 'kalshi_only' %}
+            <td>
+                {% for market in opp.markets.all %}
+                <a href="{{ market.url }}" target="_blank">
+                    {{ market.title|truncatechars:50 }}
+                </a>
+                {% endfor %}
+            </td>
+            <td class="same-exchange">
+                <span class="badge kalshi">Same exchange (Kalshi)</span>
+            </td>
+            {% elif opp.arb_type == 'polymarket_only' %}
+            <td class="same-exchange">
+                <span class="badge polymarket">Same exchange (Polymarket)</span>
+            </td>
+            <td>
+                {% for market in opp.markets.all %}
+                <a href="{{ market.url }}" target="_blank">
+                    {{ market.title|truncatechars:50 }}
+                </a>
+                {% endfor %}
+            </td>
+            {% endif %}
             <td class="positions-list">
                 {% for pos in opp.positions.positions %}
                 <div class="position">
+                    {% if opp.arb_type == 'cross_exchange' %}
                     <span class="exchange-badge {{ pos.exchange }}">{{ pos.exchange }}</span>
+                    {% endif %}
                     {{ pos.outcome }} @ {{ pos.price|floatformat:2 }}
                 </div>
                 {% endfor %}
@@ -77,103 +108,52 @@
             </td>
             <td>{{ opp.expected_value|floatformat:3 }}</td>
             <td>
+                {% if opp.arb_type == 'cross_exchange' %}
+                <span class="type-badge cross">Cross</span>
                 {% if opp.market_match.is_verified %}
-                <span style="color: #22c55e;">Verified</span>
+                <span style="color: #22c55e; font-size: 0.8em;">✓</span>
+                {% endif %}
+                {% elif opp.arb_type == 'kalshi_only' %}
+                <span class="type-badge kalshi">Kalshi</span>
                 {% else %}
-                <span style="color: #fbbf24;">Unverified</span>
+                <span class="type-badge poly">Poly</span>
                 {% endif %}
             </td>
         </tr>
         {% endfor %}
     </tbody>
 </table>
-{% endif %}
 
-{% if kalshi_only %}
-<div class="section-header">
-    <h2>Kalshi-Only Opportunities</h2>
+<!-- Pagination -->
+{% if opportunities.has_other_pages %}
+<div class="pagination">
+    {% if opportunities.has_previous %}
+    <a href="?page=1&sort={{ current_sort }}">First</a>
+    <a href="?page={{ opportunities.previous_page_number }}&sort={{ current_sort }}">Prev</a>
+    {% else %}
+    <span class="disabled">First</span>
+    <span class="disabled">Prev</span>
+    {% endif %}
+
+    {% for num in opportunities.paginator.page_range %}
+        {% if opportunities.number == num %}
+        <span class="current">{{ num }}</span>
+        {% elif num > opportunities.number|add:'-3' and num < opportunities.number|add:'3' %}
+        <a href="?page={{ num }}&sort={{ current_sort }}">{{ num }}</a>
+        {% endif %}
+    {% endfor %}
+
+    {% if opportunities.has_next %}
+    <a href="?page={{ opportunities.next_page_number }}&sort={{ current_sort }}">Next</a>
+    <a href="?page={{ opportunities.paginator.num_pages }}&sort={{ current_sort }}">Last</a>
+    {% else %}
+    <span class="disabled">Next</span>
+    <span class="disabled">Last</span>
+    {% endif %}
 </div>
-<table>
-    <thead>
-        <tr>
-            <th>Market</th>
-            <th>Positions</th>
-            <th>Total Cost</th>
-            <th>Profit %</th>
-            <th>EV</th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for opp in kalshi_only %}
-        <tr>
-            <td>
-                {% for market in opp.markets.all %}
-                <a href="{{ market.url }}" target="_blank">
-                    {{ market.title|truncatechars:60 }}
-                </a>
-                {% endfor %}
-            </td>
-            <td class="positions-list">
-                {% for pos in opp.positions.positions %}
-                <div class="position">
-                    {{ pos.outcome }} @ {{ pos.price|floatformat:2 }}
-                </div>
-                {% endfor %}
-            </td>
-            <td>{{ opp.positions.total_cost|floatformat:2 }}</td>
-            <td class="profit {% if opp.profit_percent > 5 %}high{% endif %}">
-                +{{ opp.profit_percent|floatformat:2 }}%
-            </td>
-            <td>{{ opp.expected_value|floatformat:3 }}</td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
 {% endif %}
 
-{% if poly_only %}
-<div class="section-header">
-    <h2>Polymarket-Only Opportunities</h2>
-</div>
-<table>
-    <thead>
-        <tr>
-            <th>Market</th>
-            <th>Positions</th>
-            <th>Total Cost</th>
-            <th>Profit %</th>
-            <th>EV</th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for opp in poly_only %}
-        <tr>
-            <td>
-                {% for market in opp.markets.all %}
-                <a href="{{ market.url }}" target="_blank">
-                    {{ market.title|truncatechars:60 }}
-                </a>
-                {% endfor %}
-            </td>
-            <td class="positions-list">
-                {% for pos in opp.positions.positions %}
-                <div class="position">
-                    {{ pos.outcome }} @ {{ pos.price|floatformat:2 }}
-                </div>
-                {% endfor %}
-            </td>
-            <td>{{ opp.positions.total_cost|floatformat:2 }}</td>
-            <td class="profit {% if opp.profit_percent > 5 %}high{% endif %}">
-                +{{ opp.profit_percent|floatformat:2 }}%
-            </td>
-            <td>{{ opp.expected_value|floatformat:3 }}</td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
-{% endif %}
-
-{% if not cross_exchange and not kalshi_only and not poly_only %}
+{% else %}
 <div class="empty-state">
     <p>No arbitrage opportunities found.</p>
     <p>Click "Sync Markets" to fetch latest data from exchanges.</p>
@@ -183,6 +163,20 @@
 
 {% block scripts %}
 <script>
+    const currentSort = '{{ current_sort }}';
+
+    function sortBy(column) {
+        let newSort = column;
+        if (currentSort === column) {
+            newSort = '-' + column;
+        } else if (currentSort === '-' + column) {
+            newSort = column;
+        } else {
+            newSort = '-' + column;
+        }
+        window.location.href = '?sort=' + newSort;
+    }
+
     async function syncMarkets() {
         const btn = document.getElementById('syncBtn');
         const loading = document.getElementById('syncLoading');

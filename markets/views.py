@@ -12,23 +12,35 @@ from .services import MarketMatcher, ArbitrageDetector, MarketSyncService
 
 class DashboardView(View):
     """Main dashboard showing arbitrage opportunities"""
+    ITEMS_PER_PAGE = 50
 
     def get(self, request):
         # Sorting
         sort = request.GET.get('sort', '-profit_percent')
-        valid_sorts = ['profit_percent', '-profit_percent', 'expected_value', '-expected_value', '-updated_at']
+        valid_sorts = [
+            'profit_percent', '-profit_percent',
+            'expected_value', '-expected_value',
+            'arb_type', '-arb_type',
+            'updated_at', '-updated_at'
+        ]
         if sort not in valid_sorts:
             sort = '-profit_percent'
 
-        # Get active arbitrage opportunities
+        page = request.GET.get('page', 1)
+
+        # Get all active arbitrage opportunities (mixed)
         opportunities = ArbitrageOpportunity.objects.filter(
             is_active=True
-        ).select_related('market_match').prefetch_related('markets').order_by(sort)
+        ).select_related('market_match', 'market_match__kalshi_market', 'market_match__polymarket_market').prefetch_related('markets').order_by(sort)
 
-        # Separate by type
-        kalshi_only = opportunities.filter(arb_type=ArbitrageOpportunity.ArbitrageType.KALSHI_ONLY)
-        poly_only = opportunities.filter(arb_type=ArbitrageOpportunity.ArbitrageType.POLYMARKET_ONLY)
-        cross_exchange = opportunities.filter(arb_type=ArbitrageOpportunity.ArbitrageType.CROSS_EXCHANGE)
+        # Pagination
+        paginator = Paginator(opportunities, self.ITEMS_PER_PAGE)
+        try:
+            opportunities_page = paginator.page(page)
+        except PageNotAnInteger:
+            opportunities_page = paginator.page(1)
+        except EmptyPage:
+            opportunities_page = paginator.page(paginator.num_pages)
 
         # Get market counts
         kalshi_count = Market.objects.filter(exchange=Exchange.KALSHI, is_active=True).count()
@@ -36,10 +48,8 @@ class DashboardView(View):
         match_count = MarketMatch.objects.count()
 
         context = {
-            'kalshi_only': kalshi_only,
-            'poly_only': poly_only,
-            'cross_exchange': cross_exchange,
-            'total_opportunities': opportunities.count(),
+            'opportunities': opportunities_page,
+            'total_opportunities': paginator.count,
             'kalshi_count': kalshi_count,
             'poly_count': poly_count,
             'match_count': match_count,
