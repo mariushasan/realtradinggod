@@ -284,6 +284,94 @@
         .toast.error {
             border-color: #ef4444;
         }
+
+        /* Pagination */
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 8px;
+            margin: 20px 0;
+        }
+
+        .pagination a, .pagination span {
+            padding: 8px 14px;
+            background: #222;
+            border: 1px solid #333;
+            border-radius: 6px;
+            color: #888;
+            text-decoration: none;
+            font-size: 0.9rem;
+        }
+
+        .pagination a:hover {
+            background: #333;
+            color: #fff;
+            text-decoration: none;
+        }
+
+        .pagination .current {
+            background: #2563eb;
+            border-color: #2563eb;
+            color: #fff;
+        }
+
+        .pagination .disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .page-info {
+            color: #666;
+            font-size: 0.85rem;
+            margin-bottom: 15px;
+        }
+
+        /* Sortable columns */
+        th.sortable {
+            cursor: pointer;
+            user-select: none;
+            position: relative;
+            padding-right: 25px;
+        }
+
+        th.sortable:hover {
+            color: #fff;
+        }
+
+        th.sortable::after {
+            content: '↕';
+            position: absolute;
+            right: 8px;
+            opacity: 0.3;
+        }
+
+        th.sortable.asc::after {
+            content: '↑';
+            opacity: 1;
+        }
+
+        th.sortable.desc::after {
+            content: '↓';
+            opacity: 1;
+        }
+
+        /* Filter bar */
+        .filter-bar {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .filter-bar select {
+            background: #222;
+            color: #fff;
+            border: 1px solid #333;
+            padding: 8px 12px;
+            border-radius: 6px;
+        }
     </style>
 </head>
 <body>

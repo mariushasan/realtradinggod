@@ -1,5 +1,6 @@
 import re
 from typing import List, Tuple, Set, Dict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
@@ -265,14 +266,43 @@ class MarketMatcher:
 
         return " | ".join(reasons) if reasons else "Low similarity match"
 
+    def _find_best_match_for_market(
+        self,
+        kalshi_market: Market,
+        polymarket_markets: List[Market],
+        threshold: float
+    ) -> Tuple[Market, Market, float, str] | None:
+        """Find the best Polymarket match for a single Kalshi market"""
+        best_match = None
+        best_score = 0
+        best_breakdown = {}
+
+        for poly_market in polymarket_markets:
+            score, breakdown = self.compute_similarity(
+                kalshi_market.title,
+                poly_market.title
+            )
+
+            if score > best_score:
+                best_score = score
+                best_match = poly_market
+                best_breakdown = breakdown
+
+        if best_match and best_score >= threshold:
+            reason = self.generate_match_reason(best_breakdown)
+            return (kalshi_market, best_match, best_score, reason)
+
+        return None
+
     def find_matches(
         self,
         kalshi_markets: List[Market],
         polymarket_markets: List[Market],
-        threshold: float = None
+        threshold: float = None,
+        max_workers: int = 8
     ) -> List[Tuple[Market, Market, float, str]]:
         """
-        Find matching markets between Kalshi and Polymarket.
+        Find matching markets between Kalshi and Polymarket using parallel processing.
         Returns list of tuples: (kalshi_market, poly_market, similarity_score, reason)
         """
         threshold = threshold or self.SIMILARITY_THRESHOLD
@@ -281,26 +311,22 @@ class MarketMatcher:
         if not kalshi_markets or not polymarket_markets:
             return matches
 
-        # Compare each Kalshi market to all Polymarket markets
-        for kalshi_market in kalshi_markets:
-            best_match = None
-            best_score = 0
-            best_breakdown = {}
+        # Process Kalshi markets in parallel
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(
+                    self._find_best_match_for_market,
+                    kalshi_market,
+                    polymarket_markets,
+                    threshold
+                ): kalshi_market
+                for kalshi_market in kalshi_markets
+            }
 
-            for poly_market in polymarket_markets:
-                score, breakdown = self.compute_similarity(
-                    kalshi_market.title,
-                    poly_market.title
-                )
-
-                if score > best_score:
-                    best_score = score
-                    best_match = poly_market
-                    best_breakdown = breakdown
-
-            if best_match and best_score >= threshold:
-                reason = self.generate_match_reason(best_breakdown)
-                matches.append((kalshi_market, best_match, best_score, reason))
+            for future in as_completed(futures):
+                result = future.result()
+                if result:
+                    matches.append(result)
 
         # Sort by similarity score descending
         matches.sort(key=lambda x: x[2], reverse=True)

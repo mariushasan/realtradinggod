@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import List, Dict
 import logging
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from django.utils import timezone
 
@@ -174,22 +175,25 @@ class MarketSyncService:
         return synced
 
     def sync_all(self) -> Dict[str, List[Market]]:
-        """Sync markets from all exchanges"""
+        """Sync markets from all exchanges in parallel"""
         results = {
             'kalshi': [],
             'polymarket': []
         }
 
-        try:
-            results['kalshi'] = self.sync_kalshi_markets()
-            logger.info(f"Synced {len(results['kalshi'])} Kalshi markets")
-        except Exception as e:
-            logger.error(f"Kalshi sync failed: {e}")
+        # Run both syncs in parallel
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = {
+                executor.submit(self.sync_kalshi_markets): 'kalshi',
+                executor.submit(self.sync_polymarket_markets): 'polymarket'
+            }
 
-        try:
-            results['polymarket'] = self.sync_polymarket_markets()
-            logger.info(f"Synced {len(results['polymarket'])} Polymarket markets")
-        except Exception as e:
-            logger.error(f"Polymarket sync failed: {e}")
+            for future in as_completed(futures):
+                exchange = futures[future]
+                try:
+                    results[exchange] = future.result()
+                    logger.info(f"Synced {len(results[exchange])} {exchange} markets")
+                except Exception as e:
+                    logger.error(f"{exchange} sync failed: {e}")
 
         return results
