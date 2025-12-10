@@ -25,41 +25,7 @@ curl "https://api.elections.kalshi.com/trade-api/v2/search/tags_by_categories"
 ## Response
 
 ```json
-{
-  "tags_by_categories": {
-    "Politics": [
-      {
-        "tag": "us-elections",
-        "label": "US Elections",
-        "count": 150
-      },
-      {
-        "tag": "congress",
-        "label": "Congress",
-        "count": 45
-      }
-    ],
-    "Economics": [
-      {
-        "tag": "fed",
-        "label": "Federal Reserve",
-        "count": 30
-      },
-      {
-        "tag": "inflation",
-        "label": "Inflation",
-        "count": 25
-      }
-    ],
-    "Sports": [
-      {
-        "tag": "nfl",
-        "label": "NFL",
-        "count": 100
-      }
-    ]
-  }
-}
+{'tags_by_categories': {'Climate and Weather': ['Hurricanes', 'Climate change', 'Daily temperature', 'Natural disasters', 'Snow and rain'], 'Companies': ['CEOs', 'Elon Musk', 'Earnings Mention', 'Product launches', 'KPIs', 'Layoffs'], 'Crypto': ['Pre-Market', 'SOL', 'BTC', 'Hourly', 'ETH', 'SHIBA', 'Dogecoin'], 'Economics': ['Inflation', 'Fed', 'Growth', 'Employment', 'Oil and energy'], 'Education': None, 'Elections': None, 'Entertainment': ['Music', 'Music charts', 'Awards', 'Movies', 'Golden Globes', 'Oscars', 'Video games', 'Television', 'StockX', 'Live Music', 'Rotten Tomatoes', 'Music Streams', 'Morgan Wallen'], 'Financials': ['S&P', 'Daily', 'EUR/USD', 'Nasdaq', 'Treasuries', 'USD/JPY', 'WTI'], 'Health': ['Diseases', 'Health Tech', 'FDA Approval', 'Drug Prices', 'Vaccines'], 'Mentions': None, 'Politics': ['Trump Agenda', 'Culture war', 'Bills', 'Foreign Elections', 'SCOTUS & courts', 'US Elections', 'Education', 'Debt ceiling & shutdowns', 'Immigration', 'Approval ratings', 'Cabinet', 'Trump Policies', 'Confirmations', 'Elections', 'Policy'], 'Science and Technology': ['AI', 'AI Transfers', 'Space', 'Energy', 'Papers', 'Medicine'], 'Social': None, 'Sports': ['Football', 'Soccer', 'Basketball', 'Hockey', 'Esports', 'UFC', 'Chess', 'Baseball', 'NFL', 'Cricket', 'Boxing', 'Golf', 'MMA', 'Motorsport'], 'Transportation': ['Airlines & aviation'], 'World': ['Foreign economies']}}
 ```
 
 ## Response Fields
