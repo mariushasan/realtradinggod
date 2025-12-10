@@ -1,4 +1,5 @@
 {% extends 'markets/base.html' %}
+{% load static %}
 
 {% block title %}Dashboard - Arbitrage Analyzer{% endblock %}
 
@@ -23,35 +24,66 @@
 </div>
 
 <div class="section-header">
-    <h2>Sync Markets</h2>
-    <div>
-        <button class="btn" onclick="loadTags()" id="loadTagsBtn">
-            Load Tags
-            <span class="loading" id="loadTagsLoading">...</span>
-        </button>
-        <button class="btn" onclick="refreshTags()" id="refreshTagsBtn">
-            Refresh Tags from API
-            <span class="loading" id="refreshTagsLoading">...</span>
-        </button>
-    </div>
+    <h2>Tag Filters</h2>
+    <button class="btn" onclick="refreshTags()" id="refreshTagsBtn">
+        Refresh Tags from API
+        <span class="loading" id="refreshTagsLoading">...</span>
+    </button>
 </div>
 
 <div class="tag-filters">
     <div class="tag-filter-section">
-        <h3>Kalshi Tags</h3>
-        <p class="filter-hint">No tags selected = fetch all markets</p>
+        <div class="tag-section-header">
+            <h3>Kalshi Tags</h3>
+            <label class="select-all-checkbox">
+                <input type="checkbox" id="kalshiSelectAll" onchange="toggleAllKalshi(this.checked)">
+                <span>Select All</span>
+            </label>
+        </div>
         <div class="tag-select-container" id="kalshiTagsContainer">
             <div class="tag-checkboxes" id="kalshiTags">
-                <span class="no-tags">Click "Load Tags" to see available tags</span>
+                {% if kalshi_tags_by_category %}
+                    {% for category, tags in kalshi_tags_by_category.items %}
+                    <div class="tag-category">
+                        <span class="category-label">{{ category }}</span>
+                        <div class="category-tags">
+                            {% for tag in tags %}
+                            <label class="tag-checkbox">
+                                <input type="checkbox" name="kalshi_tag" value="{{ tag.slug }}" data-label="{{ tag.label }}">
+                                <span class="tag-label">{{ tag.label }}</span>
+                            </label>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <span class="no-tags">No tags available. Click "Refresh Tags from API" to fetch them.</span>
+                {% endif %}
             </div>
         </div>
     </div>
     <div class="tag-filter-section">
-        <h3>Polymarket Tags</h3>
-        <p class="filter-hint">No tags selected = fetch all markets</p>
+        <div class="tag-section-header">
+            <h3>Polymarket Tags</h3>
+            <label class="select-all-checkbox">
+                <input type="checkbox" id="polymarketSelectAll" onchange="toggleAllPolymarket(this.checked)">
+                <span>Select All</span>
+            </label>
+        </div>
         <div class="tag-select-container" id="polymarketTagsContainer">
             <div class="tag-checkboxes" id="polymarketTags">
-                <span class="no-tags">Click "Load Tags" to see available tags</span>
+                {% if polymarket_tags %}
+                <div class="category-tags">
+                    {% for tag in polymarket_tags %}
+                    <label class="tag-checkbox">
+                        <input type="checkbox" name="polymarket_tag" value="{{ tag.external_id }}" data-label="{{ tag.label }}">
+                        <span class="tag-label">{{ tag.label }}</span>
+                    </label>
+                    {% endfor %}
+                </div>
+                {% else %}
+                    <span class="no-tags">No tags available. Click "Refresh Tags from API" to fetch them.</span>
+                {% endif %}
             </div>
         </div>
     </div>
@@ -191,7 +223,7 @@
 {% else %}
 <div class="empty-state">
     <p>No arbitrage opportunities found.</p>
-    <p>Click "Sync Markets" to fetch latest data from exchanges.</p>
+    <p>Select tags above and click "Sync Markets" to fetch data from exchanges.</p>
 </div>
 {% endif %}
 {% endblock %}
@@ -199,7 +231,6 @@
 {% block scripts %}
 <script>
     const currentSort = '{{ current_sort }}';
-    let tagsLoaded = false;
 
     function sortBy(column) {
         let newSort = column;
@@ -213,36 +244,40 @@
         window.location.href = '?sort=' + newSort;
     }
 
-    async function loadTags() {
-        const btn = document.getElementById('loadTagsBtn');
-        const loading = document.getElementById('loadTagsLoading');
+    function toggleAllKalshi(checked) {
+        document.querySelectorAll('input[name="kalshi_tag"]').forEach(cb => {
+            cb.checked = checked;
+        });
+    }
 
-        btn.disabled = true;
-        loading.style.display = 'inline';
+    function toggleAllPolymarket(checked) {
+        document.querySelectorAll('input[name="polymarket_tag"]').forEach(cb => {
+            cb.checked = checked;
+        });
+    }
 
-        try {
-            const response = await fetch('{% url "markets:get_tags" %}');
-            const data = await response.json();
+    function updateSelectAllState() {
+        // Update Kalshi select all
+        const kalshiCheckboxes = document.querySelectorAll('input[name="kalshi_tag"]');
+        const kalshiChecked = document.querySelectorAll('input[name="kalshi_tag"]:checked');
+        const kalshiSelectAll = document.getElementById('kalshiSelectAll');
+        if (kalshiSelectAll) {
+            kalshiSelectAll.checked = kalshiCheckboxes.length > 0 && kalshiCheckboxes.length === kalshiChecked.length;
+        }
 
-            if (data.success) {
-                renderKalshiTags(data.kalshi);
-                renderPolymarketTags(data.polymarket);
-                tagsLoaded = true;
-                if (data.kalshi.length === 0 && data.polymarket.length === 0) {
-                    showToast('No tags in database. Click "Refresh Tags from API" to fetch them.', 'error');
-                } else {
-                    showToast(`Loaded ${data.kalshi.length} Kalshi tags, ${data.polymarket.length} Polymarket tags`);
-                }
-            } else {
-                showToast('Error loading tags: ' + data.error, 'error');
-            }
-        } catch (e) {
-            showToast('Network error: ' + e.message, 'error');
-        } finally {
-            btn.disabled = false;
-            loading.style.display = 'none';
+        // Update Polymarket select all
+        const polyCheckboxes = document.querySelectorAll('input[name="polymarket_tag"]');
+        const polyChecked = document.querySelectorAll('input[name="polymarket_tag"]:checked');
+        const polySelectAll = document.getElementById('polymarketSelectAll');
+        if (polySelectAll) {
+            polySelectAll.checked = polyCheckboxes.length > 0 && polyCheckboxes.length === polyChecked.length;
         }
     }
+
+    // Add event listeners to individual checkboxes to update select all state
+    document.querySelectorAll('input[name="kalshi_tag"], input[name="polymarket_tag"]').forEach(cb => {
+        cb.addEventListener('change', updateSelectAllState);
+    });
 
     async function refreshTags() {
         const btn = document.getElementById('refreshTagsBtn');
@@ -262,9 +297,8 @@
             const data = await response.json();
 
             if (data.success) {
-                showToast(`Synced ${data.kalshi_synced} Kalshi tags, ${data.polymarket_synced} Polymarket tags`);
-                // Auto-load tags after refresh
-                await loadTags();
+                showToast(`Synced ${data.kalshi_synced} Kalshi tags, ${data.polymarket_synced} Polymarket tags. Reloading...`);
+                setTimeout(() => location.reload(), 1000);
             } else {
                 showToast('Error refreshing tags: ' + data.error, 'error');
             }
@@ -274,57 +308,6 @@
             btn.disabled = false;
             loading.style.display = 'none';
         }
-    }
-
-    function renderKalshiTags(tags) {
-        const container = document.getElementById('kalshiTags');
-        if (!tags || tags.length === 0) {
-            container.innerHTML = '<span class="no-tags">No tags available. Click "Refresh Tags from API" to fetch them.</span>';
-            return;
-        }
-
-        // Group tags by category
-        const byCategory = {};
-        tags.forEach(tag => {
-            const cat = tag.category || 'Other';
-            if (!byCategory[cat]) byCategory[cat] = [];
-            byCategory[cat].push(tag);
-        });
-
-        let html = '';
-        for (const [category, categoryTags] of Object.entries(byCategory)) {
-            html += `<div class="tag-category">
-                <span class="category-label">${category}</span>
-                <div class="category-tags">`;
-            categoryTags.forEach(tag => {
-                // Use slug as the value for filtering (Kalshi uses tag labels to filter)
-                html += `<label class="tag-checkbox">
-                    <input type="checkbox" name="kalshi_tag" value="${tag.slug}" data-label="${tag.label}">
-                    <span class="tag-label">${tag.label}</span>
-                </label>`;
-            });
-            html += '</div></div>';
-        }
-        container.innerHTML = html;
-    }
-
-    function renderPolymarketTags(tags) {
-        const container = document.getElementById('polymarketTags');
-        if (!tags || tags.length === 0) {
-            container.innerHTML = '<span class="no-tags">No tags available. Click "Refresh Tags from API" to fetch them.</span>';
-            return;
-        }
-
-        let html = '<div class="category-tags">';
-        tags.forEach(tag => {
-            // Use external_id as the value (Polymarket uses tag ID to filter)
-            html += `<label class="tag-checkbox">
-                <input type="checkbox" name="polymarket_tag" value="${tag.external_id}" data-label="${tag.label}">
-                <span class="tag-label">${tag.label}</span>
-            </label>`;
-        });
-        html += '</div>';
-        container.innerHTML = html;
     }
 
     function getSelectedTags() {
@@ -342,7 +325,18 @@
         return { kalshiTags, polymarketTags };
     }
 
+    function validateTagSelection() {
+        const { kalshiTags, polymarketTags } = getSelectedTags();
+        if (kalshiTags.length === 0 && polymarketTags.length === 0) {
+            showToast('Please select at least one tag to proceed.', 'error');
+            return false;
+        }
+        return true;
+    }
+
     async function syncMarkets() {
+        if (!validateTagSelection()) return;
+
         const btn = document.getElementById('syncBtn');
         const loading = document.getElementById('syncLoading');
 
@@ -372,11 +366,7 @@
             const data = await response.json();
 
             if (data.success) {
-                let msg = `Synced: ${data.kalshi_synced} Kalshi, ${data.polymarket_synced} Polymarket markets`;
-                if (kalshiTags.length > 0 || polymarketTags.length > 0) {
-                    msg += ' (filtered by tags)';
-                }
-                showToast(msg);
+                showToast(`Synced: ${data.kalshi_synced} Kalshi, ${data.polymarket_synced} Polymarket markets`);
                 setTimeout(() => location.reload(), 1500);
             } else {
                 showToast('Error: ' + data.error, 'error');
@@ -390,6 +380,8 @@
     }
 
     async function refreshOpportunities() {
+        if (!validateTagSelection()) return;
+
         const btn = document.getElementById('refreshBtn');
         const loading = document.getElementById('refreshLoading');
 
@@ -397,11 +389,23 @@
         loading.style.display = 'inline';
 
         try {
+            const { kalshiTags, polymarketTags } = getSelectedTags();
+
+            const body = {};
+            if (kalshiTags.length > 0) {
+                body.kalshi_tags = kalshiTags;
+            }
+            if (polymarketTags.length > 0) {
+                body.polymarket_tags = polymarketTags;
+            }
+
             const response = await fetch('{% url "markets:refresh_arbitrage" %}', {
                 method: 'POST',
                 headers: {
                     'X-CSRFToken': getCookie('csrftoken'),
-                }
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(body)
             });
 
             const data = await response.json();

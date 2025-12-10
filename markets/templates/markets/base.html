@@ -437,16 +437,36 @@
             padding: 15px;
         }
 
+        .tag-section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
         .tag-filter-section h3 {
             font-size: 1rem;
             color: #fff;
-            margin-bottom: 5px;
+            margin: 0;
         }
 
-        .filter-hint {
-            font-size: 0.8rem;
-            color: #666;
-            margin-bottom: 10px;
+        .select-all-checkbox {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            color: #888;
+        }
+
+        .select-all-checkbox:hover {
+            color: #fff;
+        }
+
+        .select-all-checkbox input[type="checkbox"] {
+            width: 14px;
+            height: 14px;
+            accent-color: #2563eb;
         }
 
         .tag-select-container {

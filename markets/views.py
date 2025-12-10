@@ -49,6 +49,28 @@ class DashboardView(View):
         poly_count = Market.objects.filter(exchange=Exchange.POLYMARKET, is_active=True).count()
         match_count = MarketMatch.objects.count()
 
+        # Get tags for the filter UI
+        kalshi_tags = Tag.objects.filter(exchange=Exchange.KALSHI).order_by('category', 'label')
+        polymarket_tags = Tag.objects.filter(exchange=Exchange.POLYMARKET).order_by('label')
+
+        # Group Kalshi tags by category for template
+        kalshi_tags_by_category = {}
+        for tag in kalshi_tags:
+            category = tag.category or 'Other'
+            if category not in kalshi_tags_by_category:
+                kalshi_tags_by_category[category] = []
+            kalshi_tags_by_category[category].append({
+                'id': tag.id,
+                'label': tag.label,
+                'slug': tag.slug,
+            })
+
+        # Format Polymarket tags
+        polymarket_tags_list = [
+            {'id': tag.id, 'external_id': tag.external_id, 'label': tag.label, 'slug': tag.slug}
+            for tag in polymarket_tags
+        ]
+
         context = {
             'opportunities': opportunities_page,
             'total_opportunities': paginator.count,
@@ -56,6 +78,8 @@ class DashboardView(View):
             'poly_count': poly_count,
             'match_count': match_count,
             'current_sort': sort,
+            'kalshi_tags_by_category': kalshi_tags_by_category,
+            'polymarket_tags': polymarket_tags_list,
         }
 
         return render(request, 'markets/dashboard.html', context)
@@ -287,18 +311,46 @@ def verify_match(request, match_id):
 
 @csrf_exempt
 def refresh_arbitrage(request):
-    """Refresh matching and arbitrage detection"""
+    """Refresh matching and arbitrage detection, filtered by selected tags"""
     if request.method == 'POST':
         try:
+            # Parse request body for tag filters
+            kalshi_tag_slugs = []
+            polymarket_tag_ids = []
+
+            if request.body:
+                try:
+                    data = json.loads(request.body)
+                    kalshi_tag_slugs = data.get('kalshi_tags', [])
+                    poly_tags = data.get('polymarket_tags', [])
+                    if poly_tags:
+                        polymarket_tag_ids = [str(t) for t in poly_tags]
+                except (json.JSONDecodeError, ValueError):
+                    pass
+
+            # Filter markets by tags if specified
+            kalshi_markets_qs = Market.objects.filter(
+                exchange=Exchange.KALSHI, is_active=True
+            )
+            poly_markets_qs = Market.objects.filter(
+                exchange=Exchange.POLYMARKET, is_active=True
+            )
+
+            if kalshi_tag_slugs:
+                kalshi_markets_qs = kalshi_markets_qs.filter(
+                    tags__slug__in=kalshi_tag_slugs
+                ).distinct()
+
+            if polymarket_tag_ids:
+                poly_markets_qs = poly_markets_qs.filter(
+                    tags__external_id__in=polymarket_tag_ids
+                ).distinct()
+
+            kalshi_markets = list(kalshi_markets_qs)
+            poly_markets = list(poly_markets_qs)
+
             # Run matching
             matcher = MarketMatcher()
-            kalshi_markets = list(Market.objects.filter(
-                exchange=Exchange.KALSHI, is_active=True
-            ))
-            poly_markets = list(Market.objects.filter(
-                exchange=Exchange.POLYMARKET, is_active=True
-            ))
-
             matches = matcher.find_matches(kalshi_markets, poly_markets)
             matcher.create_match_records(matches)
 
