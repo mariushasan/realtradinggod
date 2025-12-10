@@ -1,71 +1,89 @@
-Get Events
-Get all events. This endpoint excludes multivariate events. To retrieve multivariate events, use the GET /events/multivariate endpoint.
+# Kalshi: Get Events
 
-GET
-/
-events
+Retrieve a paginated list of events. Events are containers for related markets.
 
-Try it
-Query Parameters
-​
-limit
-integerdefault:200
-Parameter to specify the number of results per page. Defaults to 200. Maximum value is 200.
+## Endpoint
 
-Required range: 1 <= x <= 200
-​
-cursor
-string
-Parameter to specify the pagination cursor. Use the cursor value returned from the previous response to get the next page of results. Leave empty for the first page.
+```
+GET https://api.elections.kalshi.com/trade-api/v2/events
+```
 
-​
-with_nested_markets
-booleandefault:false
-Parameter to specify if nested markets should be included in the response. When true, each event will include a 'markets' field containing a list of Market objects associated with that event.
+## Authentication
 
-​
-with_milestones
-booleandefault:false
-If true, includes related milestones as a field alongside events.
+Not required for public event data.
 
-​
-status
-enum<string>
-Filter by event status. Possible values are 'open', 'closed', 'settled'. Leave empty to return events with any status.
+## Query Parameters
 
-Available options: open, closed, settled 
-​
-series_ticker
-string
-Filter by series ticker
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `limit` | integer | No | 200 | Results per page (1-200) |
+| `cursor` | string | No | - | Pagination cursor from previous response |
+| `status` | string | No | - | Filter by status: `open`, `closed`, `settled` |
+| `series_ticker` | string | No | - | Filter by series ticker |
+| `with_nested_markets` | boolean | No | false | Include nested market objects |
+| `with_milestones` | boolean | No | false | Include related milestones |
+| `min_close_ts` | integer | No | - | Filter events with markets closing after this Unix timestamp |
 
-​
-min_close_ts
-integer<int64>
-Filter events with at least one market with close timestamp greater than this Unix timestamp (in seconds).
+## Example Request
 
-Response
+```bash
+# Get open events with nested markets
+curl "https://api.elections.kalshi.com/trade-api/v2/events?status=open&with_nested_markets=true&limit=10"
+```
 
-200
+## Response
 
-application/json
-Events retrieved successfully
+```json
+{
+  "events": [
+    {
+      "event_ticker": "INXD-24DEC31",
+      "series_ticker": "INXD",
+      "title": "S&P 500 End of Day Dec 31, 2024",
+      "category": "Economics",
+      "sub_title": "Where will the S&P 500 close?",
+      "status": "open",
+      "mutually_exclusive": true,
+      "markets": [
+        {
+          "ticker": "INXD-24DEC31-B4903",
+          "title": "S&P 500 to close at 4,903 or above?",
+          "status": "open",
+          "yes_bid": 45,
+          "yes_ask": 47
+        }
+      ]
+    }
+  ],
+  "cursor": "eyJsYXN0X2lkIjo...",
+  "milestones": []
+}
+```
 
-​
-events
-object[]required
-Array of events matching the query criteria.
+## Response Fields
 
-Show child attributes
+| Field | Type | Description |
+|-------|------|-------------|
+| `events` | array | Array of event objects |
+| `cursor` | string | Pagination cursor for next page (empty if no more results) |
+| `milestones` | array | Related milestones (if `with_milestones=true`) |
 
-​
-cursor
-stringrequired
-Pagination cursor for the next page. Empty if there are no more results.
+### Event Object
 
-​
-milestones
-object[]
-Array of milestones related to the events.
+| Field | Type | Description |
+|-------|------|-------------|
+| `event_ticker` | string | Unique event identifier |
+| `series_ticker` | string | Parent series identifier |
+| `title` | string | Event title |
+| `sub_title` | string | Event subtitle/description |
+| `category` | string | Event category (e.g., "Economics", "Politics") |
+| `status` | string | Current status: `open`, `closed`, `settled` |
+| `mutually_exclusive` | boolean | Whether markets within event are mutually exclusive |
+| `markets` | array | Nested markets (if `with_nested_markets=true`) |
 
-url https://api.elections.kalshi.com/trade-api/v2/events?limit=200
+## Notes
+
+- This endpoint excludes multivariate events by default
+- For multivariate events, use `GET /events/multivariate`
+- Use `with_nested_markets=true` to get markets in a single request
+- Maximum 200 results per page (lower than markets endpoint)

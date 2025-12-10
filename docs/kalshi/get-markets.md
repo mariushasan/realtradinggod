@@ -1,90 +1,102 @@
-Get Markets
-Filter by market status. Possible values: unopened, open, closed, settled. Leave empty to return markets with any status.
+# Kalshi: Get Markets
 
-Only one status filter may be supplied at a time.
-Timestamp filters will be mutually exclusive from other timestamp filters and certain status filters.
-Compatible Timestamp Filters	Additional Status Filters
-min_created_ts, max_created_ts	unopened, open, empty
-min_close_ts, max_close_ts	closed, empty
-min_settled_ts, max_settled_ts	settled, empty
-GET
-/
-markets
+Retrieve a paginated list of markets with various filtering options.
 
-Try it
-Query Parameters
-​
-limit
-integer<int64>default:100
-Number of results per page. Defaults to 100. Maximum value is 1000.
+## Endpoint
 
-Required range: 1 <= x <= 1000
-​
-cursor
-string
-Pagination cursor. Use the cursor value returned from the previous response to get the next page of results. Leave empty for the first page.
+```
+GET https://api.elections.kalshi.com/trade-api/v2/markets
+```
 
-​
-event_ticker
-string
-Event ticker of desired positions. Multiple event tickers can be provided as a comma-separated list (maximum 10).
+## Authentication
 
-​
-series_ticker
-string
-Filter by series ticker
+Not required for public market data.
 
-​
-min_created_ts
-integer<int64>
-Filter items that created after this Unix timestamp
+## Query Parameters
 
-​
-max_created_ts
-integer<int64>
-Filter items that created before this Unix timestamp
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `limit` | integer | No | 100 | Results per page (1-1000) |
+| `cursor` | string | No | - | Pagination cursor from previous response |
+| `event_ticker` | string | No | - | Filter by event ticker (comma-separated, max 10) |
+| `series_ticker` | string | No | - | Filter by series ticker |
+| `tickers` | string | No | - | Filter by market tickers (comma-separated) |
+| `status` | string | No | - | Filter by status: `unopened`, `open`, `closed`, `settled` |
+| `mve_filter` | string | No | - | Filter multivariate events: `only` or `exclude` |
+| `min_created_ts` | integer | No | - | Filter markets created after this Unix timestamp |
+| `max_created_ts` | integer | No | - | Filter markets created before this Unix timestamp |
+| `min_close_ts` | integer | No | - | Filter markets closing after this Unix timestamp |
+| `max_close_ts` | integer | No | - | Filter markets closing before this Unix timestamp |
+| `min_settled_ts` | integer | No | - | Filter markets settled after this Unix timestamp |
+| `max_settled_ts` | integer | No | - | Filter markets settled before this Unix timestamp |
 
-​
-max_close_ts
-integer<int64>
-Filter items that close before this Unix timestamp
+### Timestamp Filter Compatibility
 
-​
-min_close_ts
-integer<int64>
-Filter items that close after this Unix timestamp
+| Timestamp Filters | Compatible Status Filters |
+|-------------------|--------------------------|
+| `min_created_ts`, `max_created_ts` | `unopened`, `open`, or empty |
+| `min_close_ts`, `max_close_ts` | `closed` or empty |
+| `min_settled_ts`, `max_settled_ts` | `settled` or empty |
 
-​
-min_settled_ts
-integer<int64>
-Filter items that settled after this Unix timestamp
+## Example Request
 
-​
-max_settled_ts
-integer<int64>
-Filter items that settled before this Unix timestamp
+```bash
+curl "https://api.elections.kalshi.com/trade-api/v2/markets?limit=10&status=open"
+```
 
-​
-status
-string
-Filter by market status. Possible values are 'unopened', 'open', 'closed', 'settled'. Leave empty to return markets with any status.
+## Response
 
-​
-tickers
-string
-Filter by specific market tickers. Comma-separated list of market tickers to retrieve.
+```json
+{
+  "markets": [
+    {
+      "ticker": "INXD-24DEC31-B4903",
+      "event_ticker": "INXD-24DEC31",
+      "title": "S&P 500 to close at 4,903 or above on Dec 31?",
+      "subtitle": "S&P 500 End of Day",
+      "status": "open",
+      "yes_bid": 45,
+      "yes_ask": 47,
+      "no_bid": 53,
+      "no_ask": 55,
+      "volume": 12500,
+      "open_interest": 8200,
+      "close_time": "2024-12-31T21:00:00Z",
+      "result": null
+    }
+  ],
+  "cursor": "eyJsYXN0X2lkIjo..."
+}
+```
 
-​
-mve_filter
-enum<string>
-Filter by multivariate events (combos). 'only' returns only multivariate events, 'exclude' excludes multivariate events.
+## Response Fields
 
-Available options: only, exclude 
-Response
+| Field | Type | Description |
+|-------|------|-------------|
+| `markets` | array | Array of market objects |
+| `cursor` | string | Pagination cursor for next page (empty if no more results) |
 
-200
+### Market Object
 
-application/json
-Markets retrieved successfully
+| Field | Type | Description |
+|-------|------|-------------|
+| `ticker` | string | Unique market identifier |
+| `event_ticker` | string | Parent event identifier |
+| `title` | string | Market question/title |
+| `subtitle` | string | Additional context |
+| `status` | string | Current status: `unopened`, `open`, `closed`, `settled` |
+| `yes_bid` | integer | Best bid price for YES (cents, 1-99) |
+| `yes_ask` | integer | Best ask price for YES (cents, 1-99) |
+| `no_bid` | integer | Best bid price for NO (cents, 1-99) |
+| `no_ask` | integer | Best ask price for NO (cents, 1-99) |
+| `volume` | integer | Total contracts traded |
+| `open_interest` | integer | Outstanding contracts |
+| `close_time` | string | ISO 8601 timestamp when market closes |
+| `result` | string | Settlement result: `yes`, `no`, or `null` if not settled |
 
-url https://api.elections.kalshi.com/trade-api/v2/markets?limit=100
+## Notes
+
+- Prices are in cents (1-99 range)
+- YES price + NO price should approximately equal 100 cents
+- Only one timestamp filter pair can be used at a time
+- Use cursor-based pagination for large result sets

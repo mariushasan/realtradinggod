@@ -1,528 +1,150 @@
-Get Markets
-Retrieves a list of markets with various filtering and sorting options.
+# Polymarket: Get Markets
 
-GET
-/
-markets
+Retrieve a paginated list of markets with various filtering and sorting options.
 
-Try it
-​
-Markets
-Get markets.
-Note: Markets can be traded via the CLOB if enableOrderBook is true.
-Query Parameters
-​
-limit
-integer
-Required range: x >= 0
-​
-offset
-integer
-Required range: x >= 0
-​
-order
-string
-Comma-separated list of fields to order by
+## Endpoint
 
-​
-ascending
-boolean
-​
-id
-integer[]
-​
-slug
-string[]
-​
-clob_token_ids
-string[]
-​
-condition_ids
-string[]
-​
-market_maker_address
-string[]
-​
-liquidity_num_min
-number
-​
-liquidity_num_max
-number
-​
-volume_num_min
-number
-​
-volume_num_max
-number
-​
-start_date_min
-string<date-time>
-​
-start_date_max
-string<date-time>
-​
-end_date_min
-string<date-time>
-​
-end_date_max
-string<date-time>
-​
-tag_id
-integer
-​
-related_tags
-boolean
-​
-cyom
-boolean
-​
-uma_resolution_status
-string
-​
-game_id
-string
-​
-sports_market_types
-string[]
-​
-rewards_min_size
-number
-​
-question_ids
-string[]
-​
-include_tag
-boolean
-​
-closed
-boolean
-Response
-200 - application/json
-List of markets
+```
+GET https://gamma-api.polymarket.com/markets
+```
 
-​
-id
-string
-​
-question
-string | null
-​
-conditionId
-string
-​
-slug
-string | null
-​
-twitterCardImage
-string | null
-​
-resolutionSource
-string | null
-​
-endDate
-string<date-time> | null
-​
-category
-string | null
-​
-ammType
-string | null
-​
-liquidity
-string | null
-​
-sponsorName
-string | null
-​
-sponsorImage
-string | null
-​
-startDate
-string<date-time> | null
-​
-xAxisValue
-string | null
-​
-yAxisValue
-string | null
-​
-denominationToken
-string | null
-​
-fee
-string | null
-​
-image
-string | null
-​
-icon
-string | null
-​
-lowerBound
-string | null
-​
-upperBound
-string | null
-​
-description
-string | null
-​
-outcomes
-string | null
-​
-outcomePrices
-string | null
-​
-volume
-string | null
-​
-active
-boolean | null
-​
-marketType
-string | null
-​
-formatType
-string | null
-​
-lowerBoundDate
-string | null
-​
-upperBoundDate
-string | null
-​
-closed
-boolean | null
-​
-marketMakerAddress
-string
-​
-createdBy
-integer | null
-​
-updatedBy
-integer | null
-​
-createdAt
-string<date-time> | null
-​
-updatedAt
-string<date-time> | null
-​
-closedTime
-string | null
-​
-wideFormat
-boolean | null
-​
-new
-boolean | null
-​
-mailchimpTag
-string | null
-​
-featured
-boolean | null
-​
-archived
-boolean | null
-​
-resolvedBy
-string | null
-​
-restricted
-boolean | null
-​
-marketGroup
-integer | null
-​
-groupItemTitle
-string | null
-​
-groupItemThreshold
-string | null
-​
-questionID
-string | null
-​
-umaEndDate
-string | null
-​
-enableOrderBook
-boolean | null
-​
-orderPriceMinTickSize
-number | null
-​
-orderMinSize
-number | null
-​
-umaResolutionStatus
-string | null
-​
-curationOrder
-integer | null
-​
-volumeNum
-number | null
-​
-liquidityNum
-number | null
-​
-endDateIso
-string | null
-​
-startDateIso
-string | null
-​
-umaEndDateIso
-string | null
-​
-hasReviewedDates
-boolean | null
-​
-readyForCron
-boolean | null
-​
-commentsEnabled
-boolean | null
-​
-volume24hr
-number | null
-​
-volume1wk
-number | null
-​
-volume1mo
-number | null
-​
-volume1yr
-number | null
-​
-gameStartTime
-string | null
-​
-secondsDelay
-integer | null
-​
-clobTokenIds
-string | null
-​
-disqusThread
-string | null
-​
-shortOutcomes
-string | null
-​
-teamAID
-string | null
-​
-teamBID
-string | null
-​
-umaBond
-string | null
-​
-umaReward
-string | null
-​
-fpmmLive
-boolean | null
-​
-volume24hrAmm
-number | null
-​
-volume1wkAmm
-number | null
-​
-volume1moAmm
-number | null
-​
-volume1yrAmm
-number | null
-​
-volume24hrClob
-number | null
-​
-volume1wkClob
-number | null
-​
-volume1moClob
-number | null
-​
-volume1yrClob
-number | null
-​
-volumeAmm
-number | null
-​
-volumeClob
-number | null
-​
-liquidityAmm
-number | null
-​
-liquidityClob
-number | null
-​
-makerBaseFee
-integer | null
-​
-takerBaseFee
-integer | null
-​
-customLiveness
-integer | null
-​
-acceptingOrders
-boolean | null
-​
-notificationsEnabled
-boolean | null
-​
-score
-integer | null
-​
-imageOptimized
-object
-Show child attributes
+## Authentication
 
-​
-iconOptimized
-object
-Show child attributes
+Not required.
 
-​
-events
-object[]
-Show child attributes
+## Query Parameters
 
-​
-categories
-object[]
-Show child attributes
+### Pagination & Sorting
 
-​
-tags
-object[]
-Show child attributes
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `limit` | integer | No | - | Results per page (≥0) |
+| `offset` | integer | No | 0 | Number of results to skip |
+| `order` | string | No | - | Comma-separated fields to order by |
+| `ascending` | boolean | No | false | Sort direction |
 
-​
-creator
-string | null
-​
-ready
-boolean | null
-​
-funded
-boolean | null
-​
-pastSlugs
-string | null
-​
-readyTimestamp
-string<date-time> | null
-​
-fundedTimestamp
-string<date-time> | null
-​
-acceptingOrdersTimestamp
-string<date-time> | null
-​
-competitive
-number | null
-​
-rewardsMinSize
-number | null
-​
-rewardsMaxSpread
-number | null
-​
-spread
-number | null
-​
-automaticallyResolved
-boolean | null
-​
-oneDayPriceChange
-number | null
-​
-oneHourPriceChange
-number | null
-​
-oneWeekPriceChange
-number | null
-​
-oneMonthPriceChange
-number | null
-​
-oneYearPriceChange
-number | null
-​
-lastTradePrice
-number | null
-​
-bestBid
-number | null
-​
-bestAsk
-number | null
-​
-automaticallyActive
-boolean | null
-​
-clearBookOnStart
-boolean | null
-​
-chartColor
-string | null
-​
-seriesColor
-string | null
-​
-showGmpSeries
-boolean | null
-​
-showGmpOutcome
-boolean | null
-​
-manualActivation
-boolean | null
-​
-negRiskOther
-boolean | null
-​
-gameId
-string | null
-​
-groupItemRange
-string | null
-​
-sportsMarketType
-string | null
-​
-line
-number | null
-​
-umaResolutionStatuses
-string | null
-​
-pendingDeployment
-boolean | null
-​
-deploying
-boolean | null
-​
-deployingTimestamp
-string<date-time> | null
-​
-scheduledDeploymentTimestamp
-string<date-time> | null
-​
-rfqEnabled
-boolean | null
-​
-eventStartTime
-string<date-time> | null
+### Filtering
 
-url https://gamma-api.polymarket.com/markets
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | integer[] | No | Filter by market IDs |
+| `slug` | string[] | No | Filter by market slugs |
+| `clob_token_ids` | string[] | No | Filter by CLOB token IDs |
+| `condition_ids` | string[] | No | Filter by condition IDs |
+| `question_ids` | string[] | No | Filter by question IDs |
+| `tag_id` | integer | No | Filter by tag ID |
+| `closed` | boolean | No | Filter by closed status |
+
+### Volume & Liquidity Filters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `liquidity_num_min` | number | No | Minimum liquidity |
+| `liquidity_num_max` | number | No | Maximum liquidity |
+| `volume_num_min` | number | No | Minimum volume |
+| `volume_num_max` | number | No | Maximum volume |
+
+### Date Filters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `start_date_min` | datetime | No | Minimum start date (ISO 8601) |
+| `start_date_max` | datetime | No | Maximum start date (ISO 8601) |
+| `end_date_min` | datetime | No | Minimum end date (ISO 8601) |
+| `end_date_max` | datetime | No | Maximum end date (ISO 8601) |
+
+### Other Filters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `related_tags` | boolean | No | Include related tags |
+| `include_tag` | boolean | No | Include tag objects in response |
+| `cyom` | boolean | No | Filter Create Your Own Market |
+| `game_id` | string | No | Filter by game ID |
+| `sports_market_types` | string[] | No | Filter by sports market types |
+| `rewards_min_size` | number | No | Minimum rewards size |
+
+## Example Request
+
+```bash
+curl "https://gamma-api.polymarket.com/markets?limit=10&closed=false&order=volume&ascending=false"
+```
+
+## Response
+
+```json
+[
+  {
+    "id": "12345",
+    "question": "Will Bitcoin reach $100,000 by end of 2024?",
+    "conditionId": "0x1234567890abcdef...",
+    "slug": "will-bitcoin-reach-100000",
+    "description": "This market resolves to Yes if...",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.45\", \"0.55\"]",
+    "volume": "1500000",
+    "volumeNum": 1500000,
+    "liquidity": "250000",
+    "liquidityNum": 250000,
+    "startDate": "2024-01-01T00:00:00.000Z",
+    "endDate": "2024-12-31T23:59:59.000Z",
+    "active": true,
+    "closed": false,
+    "enableOrderBook": true,
+    "clobTokenIds": "[\"71321\", \"71322\"]",
+    "bestBid": 0.44,
+    "bestAsk": 0.46,
+    "lastTradePrice": 0.45,
+    "volume24hr": 50000,
+    "oneDayPriceChange": 0.02
+  }
+]
+```
+
+## Response Fields
+
+### Market Object
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique market identifier |
+| `question` | string | Market question |
+| `conditionId` | string | Gnosis condition ID |
+| `slug` | string | URL-friendly identifier |
+| `description` | string | Full market description |
+| `outcomes` | string | JSON array of outcome names |
+| `outcomePrices` | string | JSON array of outcome prices (decimal) |
+| `volume` | string | Total volume traded (string) |
+| `volumeNum` | number | Total volume traded (number) |
+| `liquidity` | string | Current liquidity (string) |
+| `liquidityNum` | number | Current liquidity (number) |
+| `startDate` | string | ISO 8601 market start date |
+| `endDate` | string | ISO 8601 market end date |
+| `active` | boolean | Whether market is active |
+| `closed` | boolean | Whether market is closed |
+| `enableOrderBook` | boolean | Whether CLOB trading is enabled |
+| `clobTokenIds` | string | JSON array of CLOB token IDs |
+| `bestBid` | number | Current best bid price |
+| `bestAsk` | number | Current best ask price |
+| `lastTradePrice` | number | Most recent trade price |
+| `volume24hr` | number | 24-hour trading volume |
+| `oneDayPriceChange` | number | Price change in last 24 hours |
+
+### Volume Fields
+
+| Field | Description |
+|-------|-------------|
+| `volume24hr` | Volume in last 24 hours |
+| `volume1wk` | Volume in last week |
+| `volume1mo` | Volume in last month |
+| `volume1yr` | Volume in last year |
+| `volumeAmm` | Volume from AMM |
+| `volumeClob` | Volume from CLOB |
+
+## Notes
+
+- Prices are in decimal format (0.01-0.99)
+- Markets can be traded via CLOB if `enableOrderBook` is true
+- Use `clobTokenIds` for trading via the CLOB API
+- Returns an array (not wrapped in object like Kalshi)
+- Volume/liquidity fields have both string and number versions

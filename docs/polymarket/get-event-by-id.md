@@ -1,310 +1,207 @@
-Path Parameters
-​
-id
-integerrequired
-Query Parameters
-​
-include_chat
-boolean
-​
-include_template
-boolean
-Response
+# Polymarket: Get Event by ID
 
-200
+Retrieve detailed information about a specific event and its markets.
 
-application/json
-Event
+## Endpoint
 
-​
-id
-string
-​
-ticker
-string | null
-​
-slug
-string | null
-​
-title
-string | null
-​
-subtitle
-string | null
-​
-description
-string | null
-​
-resolutionSource
-string | null
-​
-startDate
-string<date-time> | null
-​
-creationDate
-string<date-time> | null
-​
-endDate
-string<date-time> | null
-​
-image
-string | null
-​
-icon
-string | null
-​
-active
-boolean | null
-​
-closed
-boolean | null
-​
-archived
-boolean | null
-​
-new
-boolean | null
-​
-featured
-boolean | null
-​
-restricted
-boolean | null
-​
-liquidity
-number | null
-​
-volume
-number | null
-​
-openInterest
-number | null
-​
-sortBy
-string | null
-​
-category
-string | null
-​
-subcategory
-string | null
-​
-isTemplate
-boolean | null
-​
-templateVariables
-string | null
-​
-published_at
-string | null
-​
-createdBy
-string | null
-​
-updatedBy
-string | null
-​
-createdAt
-string<date-time> | null
-​
-updatedAt
-string<date-time> | null
-​
-commentsEnabled
-boolean | null
-​
-competitive
-number | null
-​
-volume24hr
-number | null
-​
-volume1wk
-number | null
-​
-volume1mo
-number | null
-​
-volume1yr
-number | null
-​
-featuredImage
-string | null
-​
-disqusThread
-string | null
-​
-parentEvent
-string | null
-​
-enableOrderBook
-boolean | null
-​
-liquidityAmm
-number | null
-​
-liquidityClob
-number | null
-​
-negRisk
-boolean | null
-​
-negRiskMarketID
-string | null
-​
-negRiskFeeBips
-integer | null
-​
-commentCount
-integer | null
-​
-imageOptimized
-object
-Show child attributes
+```
+GET https://gamma-api.polymarket.com/events/{id}
+```
 
-​
-iconOptimized
-object
-Show child attributes
+## Authentication
 
-​
-featuredImageOptimized
-object
-Show child attributes
+Not required.
 
-​
-subEvents
-string[] | null
-​
-markets
-object[]
-Show child attributes
+## Path Parameters
 
-​
-series
-object[]
-Show child attributes
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | integer | Yes | Event ID |
 
-​
-categories
-object[]
-Show child attributes
+## Query Parameters
 
-​
-collections
-object[]
-Show child attributes
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `include_chat` | boolean | No | false | Include chat information |
+| `include_template` | boolean | No | false | Include template data |
 
-​
-tags
-object[]
-Show child attributes
+## Example Request
 
-​
-cyom
-boolean | null
-​
-closedTime
-string<date-time> | null
-​
-showAllOutcomes
-boolean | null
-​
-showMarketImages
-boolean | null
-​
-automaticallyResolved
-boolean | null
-​
-enableNegRisk
-boolean | null
-​
-automaticallyActive
-boolean | null
-​
-eventDate
-string | null
-​
-startTime
-string<date-time> | null
-​
-eventWeek
-integer | null
-​
-seriesSlug
-string | null
-​
-score
-string | null
-​
-elapsed
-string | null
-​
-period
-string | null
-​
-live
-boolean | null
-​
-ended
-boolean | null
-​
-finishedTimestamp
-string<date-time> | null
-​
-gmpChartMode
-string | null
-​
-eventCreators
-object[]
-Show child attributes
+```bash
+curl "https://gamma-api.polymarket.com/events/67890"
+```
 
-​
-tweetCount
-integer | null
-​
-chats
-object[]
-Show child attributes
+## Response
 
-​
-featuredOrder
-integer | null
-​
-estimateValue
-boolean | null
-​
-cantEstimate
-boolean | null
-​
-estimatedValue
-string | null
-​
-templates
-object[]
-Show child attributes
+```json
+{
+  "id": "67890",
+  "ticker": "BTC-2024",
+  "slug": "bitcoin-price-predictions-2024",
+  "title": "Bitcoin Price Predictions 2024",
+  "subtitle": "Where will Bitcoin's price be?",
+  "description": "A collection of markets predicting Bitcoin's price movements in 2024. Markets will resolve based on the official Bitcoin price from CoinMarketCap.",
+  "resolutionSource": "https://coinmarketcap.com/currencies/bitcoin/",
+  "startDate": "2024-01-01T00:00:00.000Z",
+  "creationDate": "2023-12-15T00:00:00.000Z",
+  "endDate": "2024-12-31T23:59:59.000Z",
+  "image": "https://polymarket.com/images/btc-2024.png",
+  "icon": "https://polymarket.com/icons/btc.png",
+  "active": true,
+  "closed": false,
+  "archived": false,
+  "featured": true,
+  "restricted": false,
+  "liquidity": 500000,
+  "volume": 2500000,
+  "openInterest": 150000,
+  "category": "Crypto",
+  "subcategory": "Bitcoin",
+  "enableOrderBook": true,
+  "negRisk": true,
+  "negRiskMarketID": "0xabc123def456...",
+  "negRiskFeeBips": 100,
+  "volume24hr": 75000,
+  "volume1wk": 300000,
+  "volume1mo": 1200000,
+  "competitive": 0.85,
+  "commentCount": 245,
+  "commentsEnabled": true,
+  "markets": [
+    {
+      "id": "12345",
+      "question": "Will Bitcoin reach $100,000 by end of 2024?",
+      "conditionId": "0x1234567890abcdef...",
+      "outcomes": "[\"Yes\", \"No\"]",
+      "outcomePrices": "[\"0.45\", \"0.55\"]",
+      "volume": "750000",
+      "clobTokenIds": "[\"71321\", \"71322\"]"
+    },
+    {
+      "id": "12346",
+      "question": "Will Bitcoin drop below $30,000 in 2024?",
+      "conditionId": "0xfedcba0987654321...",
+      "outcomes": "[\"Yes\", \"No\"]",
+      "outcomePrices": "[\"0.15\", \"0.85\"]",
+      "volume": "500000",
+      "clobTokenIds": "[\"71323\", \"71324\"]"
+    }
+  ],
+  "tags": [
+    {
+      "id": "1",
+      "label": "Crypto",
+      "slug": "crypto"
+    },
+    {
+      "id": "15",
+      "label": "Bitcoin",
+      "slug": "bitcoin"
+    }
+  ],
+  "categories": [
+    {
+      "id": "5",
+      "name": "Cryptocurrency"
+    }
+  ],
+  "series": [],
+  "collections": []
+}
+```
 
-​
-spreadsMainLine
-number | null
-​
-totalsMainLine
-number | null
-​
-carouselMap
-string | null
-​
-pendingDeployment
-boolean | null
-​
-deploying
-boolean | null
-​
-deployingTimestamp
-string<date-time> | null
-​
-scheduledDeploymentTimestamp
-string<date-time> | null
-​
-gameStatus
-string | null
+## Response Fields
+
+### Core Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique event identifier |
+| `ticker` | string | Event ticker symbol |
+| `slug` | string | URL-friendly identifier |
+| `title` | string | Event title |
+| `subtitle` | string | Event subtitle |
+| `description` | string | Full event description |
+| `resolutionSource` | string | Resolution source URL |
+| `category` | string | Primary category |
+| `subcategory` | string | Sub-category |
+
+### Media Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `image` | string | Event image URL |
+| `icon` | string | Event icon URL |
+| `featuredImage` | string | Featured image URL |
+
+### Status Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `active` | boolean | Event is active |
+| `closed` | boolean | Event has ended |
+| `archived` | boolean | Event is archived |
+| `featured` | boolean | Event is featured |
+| `restricted` | boolean | Event has restrictions |
+
+### Trading Metrics
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `liquidity` | number | Total liquidity |
+| `volume` | number | Total volume |
+| `openInterest` | number | Open interest |
+| `competitive` | number | Competitiveness score (0-1) |
+
+### Negative Risk
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `negRisk` | boolean | Uses negative risk model |
+| `negRiskMarketID` | string | Neg-risk contract ID |
+| `negRiskFeeBips` | integer | Fee in basis points (100 = 1%) |
+| `enableNegRisk` | boolean | Neg-risk is enabled |
+
+### Volume History
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `volume24hr` | number | 24-hour volume |
+| `volume1wk` | number | 7-day volume |
+| `volume1mo` | number | 30-day volume |
+| `volume1yr` | number | 1-year volume |
+
+### Social/Community
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `commentCount` | integer | Number of comments |
+| `commentsEnabled` | boolean | Comments are enabled |
+| `tweetCount` | integer | Related tweets |
+
+### Timestamps
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `startDate` | string | Event start (ISO 8601) |
+| `endDate` | string | Event end (ISO 8601) |
+| `creationDate` | string | Creation timestamp |
+| `createdAt` | string | DB creation timestamp |
+| `updatedAt` | string | Last update timestamp |
+
+### Nested Objects
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `markets` | array | Markets in this event |
+| `tags` | array | Associated tags |
+| `categories` | array | Event categories |
+| `series` | array | Related series |
+| `collections` | array | Parent collections |
+
+## Notes
+
+- Events group related markets together (e.g., all Bitcoin price predictions)
+- `negRisk` events have mutually exclusive outcomes across markets
+- Use markets array to get all tradeable outcomes
+- Each market has its own `conditionId` and `clobTokenIds` for trading

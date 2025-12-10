@@ -1,441 +1,162 @@
-Path Parameters
-​
-id
-integerrequired
-Query Parameters
-​
-include_tag
-boolean
-Response
+# Polymarket: Get Market by ID
 
-200
+Retrieve detailed information about a specific market by its ID.
 
-application/json
-Market
+## Endpoint
 
-​
-id
-string
-​
-question
-string | null
-​
-conditionId
-string
-​
-slug
-string | null
-​
-twitterCardImage
-string | null
-​
-resolutionSource
-string | null
-​
-endDate
-string<date-time> | null
-​
-category
-string | null
-​
-ammType
-string | null
-​
-liquidity
-string | null
-​
-sponsorName
-string | null
-​
-sponsorImage
-string | null
-​
-startDate
-string<date-time> | null
-​
-xAxisValue
-string | null
-​
-yAxisValue
-string | null
-​
-denominationToken
-string | null
-​
-fee
-string | null
-​
-image
-string | null
-​
-icon
-string | null
-​
-lowerBound
-string | null
-​
-upperBound
-string | null
-​
-description
-string | null
-​
-outcomes
-string | null
-​
-outcomePrices
-string | null
-​
-volume
-string | null
-​
-active
-boolean | null
-​
-marketType
-string | null
-​
-formatType
-string | null
-​
-lowerBoundDate
-string | null
-​
-upperBoundDate
-string | null
-​
-closed
-boolean | null
-​
-marketMakerAddress
-string
-​
-createdBy
-integer | null
-​
-updatedBy
-integer | null
-​
-createdAt
-string<date-time> | null
-​
-updatedAt
-string<date-time> | null
-​
-closedTime
-string | null
-​
-wideFormat
-boolean | null
-​
-new
-boolean | null
-​
-mailchimpTag
-string | null
-​
-featured
-boolean | null
-​
-archived
-boolean | null
-​
-resolvedBy
-string | null
-​
-restricted
-boolean | null
-​
-marketGroup
-integer | null
-​
-groupItemTitle
-string | null
-​
-groupItemThreshold
-string | null
-​
-questionID
-string | null
-​
-umaEndDate
-string | null
-​
-enableOrderBook
-boolean | null
-​
-orderPriceMinTickSize
-number | null
-​
-orderMinSize
-number | null
-​
-umaResolutionStatus
-string | null
-​
-curationOrder
-integer | null
-​
-volumeNum
-number | null
-​
-liquidityNum
-number | null
-​
-endDateIso
-string | null
-​
-startDateIso
-string | null
-​
-umaEndDateIso
-string | null
-​
-hasReviewedDates
-boolean | null
-​
-readyForCron
-boolean | null
-​
-commentsEnabled
-boolean | null
-​
-volume24hr
-number | null
-​
-volume1wk
-number | null
-​
-volume1mo
-number | null
-​
-volume1yr
-number | null
-​
-gameStartTime
-string | null
-​
-secondsDelay
-integer | null
-​
-clobTokenIds
-string | null
-​
-disqusThread
-string | null
-​
-shortOutcomes
-string | null
-​
-teamAID
-string | null
-​
-teamBID
-string | null
-​
-umaBond
-string | null
-​
-umaReward
-string | null
-​
-fpmmLive
-boolean | null
-​
-volume24hrAmm
-number | null
-​
-volume1wkAmm
-number | null
-​
-volume1moAmm
-number | null
-​
-volume1yrAmm
-number | null
-​
-volume24hrClob
-number | null
-​
-volume1wkClob
-number | null
-​
-volume1moClob
-number | null
-​
-volume1yrClob
-number | null
-​
-volumeAmm
-number | null
-​
-volumeClob
-number | null
-​
-liquidityAmm
-number | null
-​
-liquidityClob
-number | null
-​
-makerBaseFee
-integer | null
-​
-takerBaseFee
-integer | null
-​
-customLiveness
-integer | null
-​
-acceptingOrders
-boolean | null
-​
-notificationsEnabled
-boolean | null
-​
-score
-integer | null
-​
-imageOptimized
-object
-Show child attributes
+```
+GET https://gamma-api.polymarket.com/markets/{id}
+```
 
-​
-iconOptimized
-object
-Show child attributes
+## Authentication
 
-​
-events
-object[]
-Show child attributes
+Not required.
 
-​
-categories
-object[]
-Show child attributes
+## Path Parameters
 
-​
-tags
-object[]
-Show child attributes
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | integer | Yes | Market ID |
 
-​
-creator
-string | null
-​
-ready
-boolean | null
-​
-funded
-boolean | null
-​
-pastSlugs
-string | null
-​
-readyTimestamp
-string<date-time> | null
-​
-fundedTimestamp
-string<date-time> | null
-​
-acceptingOrdersTimestamp
-string<date-time> | null
-​
-competitive
-number | null
-​
-rewardsMinSize
-number | null
-​
-rewardsMaxSpread
-number | null
-​
-spread
-number | null
-​
-automaticallyResolved
-boolean | null
-​
-oneDayPriceChange
-number | null
-​
-oneHourPriceChange
-number | null
-​
-oneWeekPriceChange
-number | null
-​
-oneMonthPriceChange
-number | null
-​
-oneYearPriceChange
-number | null
-​
-lastTradePrice
-number | null
-​
-bestBid
-number | null
-​
-bestAsk
-number | null
-​
-automaticallyActive
-boolean | null
-​
-clearBookOnStart
-boolean | null
-​
-chartColor
-string | null
-​
-seriesColor
-string | null
-​
-showGmpSeries
-boolean | null
-​
-showGmpOutcome
-boolean | null
-​
-manualActivation
-boolean | null
-​
-negRiskOther
-boolean | null
-​
-gameId
-string | null
-​
-groupItemRange
-string | null
-​
-sportsMarketType
-string | null
-​
-line
-number | null
-​
-umaResolutionStatuses
-string | null
-​
-pendingDeployment
-boolean | null
-​
-deploying
-boolean | null
-​
-deployingTimestamp
-string<date-time> | null
-​
-scheduledDeploymentTimestamp
-string<date-time> | null
-​
-rfqEnabled
-boolean | null
-​
-eventStartTime
-string<date-time> | null
+## Query Parameters
 
-url https://gamma-api.polymarket.com/markets/{id}
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `include_tag` | boolean | No | false | Include tag objects in response |
+
+## Example Request
+
+```bash
+curl "https://gamma-api.polymarket.com/markets/12345"
+```
+
+## Response
+
+```json
+{
+  "id": "12345",
+  "question": "Will Bitcoin reach $100,000 by end of 2024?",
+  "conditionId": "0x1234567890abcdef...",
+  "slug": "will-bitcoin-reach-100000",
+  "description": "This market resolves to Yes if Bitcoin's price reaches or exceeds $100,000 USD at any point before December 31, 2024 23:59:59 UTC.",
+  "resolutionSource": "https://coinmarketcap.com/currencies/bitcoin/",
+  "outcomes": "[\"Yes\", \"No\"]",
+  "outcomePrices": "[\"0.45\", \"0.55\"]",
+  "volume": "1500000",
+  "volumeNum": 1500000,
+  "liquidity": "250000",
+  "liquidityNum": 250000,
+  "startDate": "2024-01-01T00:00:00.000Z",
+  "endDate": "2024-12-31T23:59:59.000Z",
+  "createdAt": "2024-01-01T00:00:00.000Z",
+  "updatedAt": "2024-06-15T12:30:00.000Z",
+  "active": true,
+  "closed": false,
+  "archived": false,
+  "featured": true,
+  "enableOrderBook": true,
+  "clobTokenIds": "[\"71321\", \"71322\"]",
+  "marketMakerAddress": "0xabcdef1234567890...",
+  "bestBid": 0.44,
+  "bestAsk": 0.46,
+  "lastTradePrice": 0.45,
+  "spread": 0.02,
+  "volume24hr": 50000,
+  "volume1wk": 200000,
+  "volume1mo": 750000,
+  "oneDayPriceChange": 0.02,
+  "oneWeekPriceChange": 0.05,
+  "oneMonthPriceChange": 0.10,
+  "events": [
+    {
+      "id": "67890",
+      "title": "Bitcoin Price Predictions 2024"
+    }
+  ],
+  "tags": [
+    {
+      "id": "1",
+      "label": "Crypto",
+      "slug": "crypto"
+    }
+  ]
+}
+```
+
+## Response Fields
+
+### Core Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique market identifier |
+| `question` | string | Market question |
+| `conditionId` | string | Gnosis condition ID for on-chain trading |
+| `slug` | string | URL-friendly identifier |
+| `description` | string | Full market description and rules |
+| `resolutionSource` | string | Source URL for resolution |
+| `outcomes` | string | JSON array of outcome names |
+| `outcomePrices` | string | JSON array of current prices (decimal) |
+
+### Status Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `active` | boolean | Market is active for trading |
+| `closed` | boolean | Trading has ended |
+| `archived` | boolean | Market is archived |
+| `featured` | boolean | Market is featured on homepage |
+
+### Trading Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `enableOrderBook` | boolean | CLOB trading available |
+| `clobTokenIds` | string | JSON array of token IDs for CLOB |
+| `marketMakerAddress` | string | AMM contract address |
+| `bestBid` | number | Current best bid |
+| `bestAsk` | number | Current best ask |
+| `lastTradePrice` | number | Most recent trade price |
+| `spread` | number | Bid-ask spread |
+
+### Volume & Liquidity
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `volume` / `volumeNum` | string/number | Total volume |
+| `liquidity` / `liquidityNum` | string/number | Current liquidity |
+| `volume24hr` | number | 24-hour volume |
+| `volume1wk` | number | Weekly volume |
+| `volume1mo` | number | Monthly volume |
+
+### Price Changes
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `oneDayPriceChange` | number | 24-hour price change |
+| `oneWeekPriceChange` | number | 7-day price change |
+| `oneMonthPriceChange` | number | 30-day price change |
+
+### Timestamps
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `startDate` | string | When market starts (ISO 8601) |
+| `endDate` | string | When market ends (ISO 8601) |
+| `createdAt` | string | Creation timestamp |
+| `updatedAt` | string | Last update timestamp |
+
+### Related Objects
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `events` | array | Parent events containing this market |
+| `tags` | array | Associated tags |
+| `categories` | array | Market categories |
+
+## Notes
+
+- Use `conditionId` for on-chain operations
+- Use `clobTokenIds` for CLOB API trading
+- Prices are in decimal format (0.01-0.99)
+- `outcomes` and `outcomePrices` are JSON strings that need parsing

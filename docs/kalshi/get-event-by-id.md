@@ -1,42 +1,97 @@
-Get Event
-Endpoint for getting data about an event by its ticker. An event represents a real-world occurrence that can be traded on, such as an election, sports game, or economic indicator release. Events contain one or more markets where users can place trades on different outcomes.
+# Kalshi: Get Event by Ticker
 
-GET
-/
-events
-/
-{event_ticker}
+Retrieve detailed information about a specific event and its markets.
 
-Try it
-Path Parameters
-​
-event_ticker
-stringrequired
-Event ticker
+## Endpoint
 
-Query Parameters
-​
-with_nested_markets
-booleandefault:false
-If true, markets are included within the event object. If false (default), markets are returned as a separate top-level field in the response.
+```
+GET https://api.elections.kalshi.com/trade-api/v2/events/{event_ticker}
+```
 
-Response
+## Authentication
 
-200
+Not required for public event data.
 
-application/json
-Event retrieved successfully
+## Path Parameters
 
-​
-event
-objectrequired
-Data for the event.
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `event_ticker` | string | Yes | Event ticker (e.g., `INXD-24DEC31`) |
 
-Show child attributes
+## Query Parameters
 
-​
-markets
-object[]required
-Data for the markets in this event. This field is deprecated in favour of the "markets" field inside the event. Which will be filled with the same value if you use the query parameter "with_nested_markets=true".
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `with_nested_markets` | boolean | No | false | If true, markets are nested inside the event object |
 
-url https://api.elections.kalshi.com/trade-api/v2/events/{event_ticker}
+## Example Request
+
+```bash
+# Get event with nested markets
+curl "https://api.elections.kalshi.com/trade-api/v2/events/INXD-24DEC31?with_nested_markets=true"
+```
+
+## Response
+
+```json
+{
+  "event": {
+    "event_ticker": "INXD-24DEC31",
+    "series_ticker": "INXD",
+    "title": "S&P 500 End of Day Dec 31, 2024",
+    "sub_title": "Where will the S&P 500 close?",
+    "category": "Economics",
+    "status": "open",
+    "mutually_exclusive": true,
+    "strike_date": "2024-12-31",
+    "markets": [
+      {
+        "ticker": "INXD-24DEC31-B4903",
+        "title": "S&P 500 to close at 4,903 or above?",
+        "status": "open",
+        "yes_bid": 45,
+        "yes_ask": 47,
+        "volume": 12500
+      }
+    ]
+  },
+  "markets": [
+    {
+      "ticker": "INXD-24DEC31-B4903",
+      "title": "S&P 500 to close at 4,903 or above?",
+      "status": "open",
+      "yes_bid": 45,
+      "yes_ask": 47,
+      "volume": 12500
+    }
+  ]
+}
+```
+
+## Response Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `event` | object | Event object with details |
+| `markets` | array | Markets in this event (top-level, deprecated) |
+
+### Event Object
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `event_ticker` | string | Unique event identifier |
+| `series_ticker` | string | Parent series identifier |
+| `title` | string | Event title |
+| `sub_title` | string | Event subtitle/description |
+| `category` | string | Event category |
+| `status` | string | Current status: `open`, `closed`, `settled` |
+| `mutually_exclusive` | boolean | Whether markets are mutually exclusive |
+| `strike_date` | string | Date the event resolves (YYYY-MM-DD) |
+| `markets` | array | Nested markets (if `with_nested_markets=true`) |
+
+## Notes
+
+- The top-level `markets` field is deprecated
+- Use `with_nested_markets=true` to get markets nested inside the event object
+- Events contain one or more markets representing different outcomes
+- For mutually exclusive events, exactly one market will settle YES
