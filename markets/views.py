@@ -148,36 +148,17 @@ class MatchesListView(View):
 
 @csrf_exempt
 def sync_markets(request):
-    """Sync markets from exchanges"""
+    """Sync markets from exchanges (fetch and save only)"""
     if request.method == 'POST':
         sync_service = MarketSyncService()
 
         try:
             results = sync_service.sync_all()
 
-            # Run matching after sync
-            matcher = MarketMatcher()
-            kalshi_markets = list(Market.objects.filter(
-                exchange=Exchange.KALSHI, is_active=True
-            ))
-            poly_markets = list(Market.objects.filter(
-                exchange=Exchange.POLYMARKET, is_active=True
-            ))
-
-            matches = matcher.find_matches(kalshi_markets, poly_markets)
-            matcher.create_match_records(matches)
-
-            # Detect arbitrage
-            detector = ArbitrageDetector()
-            opportunities = detector.find_all_opportunities()
-            detector.save_opportunities(opportunities)
-
             return JsonResponse({
                 'success': True,
                 'kalshi_synced': len(results['kalshi']),
                 'polymarket_synced': len(results['polymarket']),
-                'matches_found': len(matches),
-                'opportunities_found': len(opportunities)
             })
 
         except Exception as e:
@@ -214,15 +195,29 @@ def verify_match(request, match_id):
 
 @csrf_exempt
 def refresh_arbitrage(request):
-    """Refresh arbitrage detection only"""
+    """Refresh matching and arbitrage detection"""
     if request.method == 'POST':
         try:
+            # Run matching
+            matcher = MarketMatcher()
+            kalshi_markets = list(Market.objects.filter(
+                exchange=Exchange.KALSHI, is_active=True
+            ))
+            poly_markets = list(Market.objects.filter(
+                exchange=Exchange.POLYMARKET, is_active=True
+            ))
+
+            matches = matcher.find_matches(kalshi_markets, poly_markets)
+            matcher.create_match_records(matches)
+
+            # Detect arbitrage
             detector = ArbitrageDetector()
             opportunities = detector.find_all_opportunities()
             detector.save_opportunities(opportunities)
 
             return JsonResponse({
                 'success': True,
+                'matches_found': len(matches),
                 'opportunities_found': len(opportunities)
             })
 

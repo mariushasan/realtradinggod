@@ -29,8 +29,8 @@
             Sync Markets
             <span class="loading" id="syncLoading">...</span>
         </button>
-        <button class="btn" onclick="refreshArbitrage()" id="refreshBtn">
-            Refresh Arbitrage
+        <button class="btn" onclick="refreshOpportunities()" id="refreshBtn">
+            Refresh Opportunities
             <span class="loading" id="refreshLoading">...</span>
         </button>
     </div>
@@ -195,7 +195,7 @@
             const data = await response.json();
 
             if (data.success) {
-                showToast(`Synced: ${data.kalshi_synced} Kalshi, ${data.polymarket_synced} Polymarket, ${data.matches_found} matches, ${data.opportunities_found} opportunities`);
+                showToast(`Synced: ${data.kalshi_synced} Kalshi, ${data.polymarket_synced} Polymarket markets`);
                 setTimeout(() => location.reload(), 1500);
             } else {
                 showToast('Error: ' + data.error, 'error');
@@ -208,7 +208,7 @@
         }
     }
 
-    async function refreshArbitrage() {
+    async function refreshOpportunities() {
         const btn = document.getElementById('refreshBtn');
         const loading = document.getElementById('refreshLoading');
 
@@ -226,7 +226,7 @@
             const data = await response.json();
 
             if (data.success) {
-                showToast(`Found ${data.opportunities_found} arbitrage opportunities`);
+                showToast(`Found ${data.matches_found} matches, ${data.opportunities_found} opportunities`);
                 setTimeout(() => location.reload(), 1500);
             } else {
                 showToast('Error: ' + data.error, 'error');
