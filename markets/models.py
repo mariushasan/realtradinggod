@@ -51,6 +51,9 @@ class Market(models.Model):
     # URLs for linking
     url = models.URLField(max_length=500, blank=True)
 
+    # Tags associated with this market (for filtering)
+    tags = models.ManyToManyField(Tag, related_name='markets', blank=True)
+
     # Status
     is_active = models.BooleanField(default=True)
 

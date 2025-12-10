@@ -113,6 +113,14 @@ class MarketSyncService:
         """Sync markets from Kalshi, optionally filtered by series tickers (tags)"""
         synced = []
 
+        # Get Tag objects for the selected slugs
+        tag_objects = []
+        if series_tickers:
+            tag_objects = list(Tag.objects.filter(
+                exchange=Exchange.KALSHI,
+                slug__in=series_tickers
+            ))
+
         try:
             # If series_tickers provided, fetch events for each series
             if series_tickers:
@@ -180,6 +188,11 @@ class MarketSyncService:
                             'close_time': close_time
                         }
                     )
+
+                    # Associate market with the tags used for syncing
+                    if tag_objects:
+                        market.tags.add(*tag_objects)
+
                     synced.append(market)
 
         except Exception as e:
@@ -191,6 +204,15 @@ class MarketSyncService:
     def sync_polymarket_markets(self, tag_ids: Optional[List[int]] = None) -> List[Market]:
         """Sync markets from Polymarket, optionally filtered by tag IDs"""
         synced = []
+
+        # Get Tag objects for the selected external_ids
+        tag_objects = []
+        if tag_ids:
+            tag_id_strs = [str(t) for t in tag_ids]
+            tag_objects = list(Tag.objects.filter(
+                exchange=Exchange.POLYMARKET,
+                external_id__in=tag_id_strs
+            ))
 
         try:
             # If tag_ids provided, fetch markets for each tag
@@ -280,6 +302,11 @@ class MarketSyncService:
                         'close_time': close_time
                     }
                 )
+
+                # Associate market with the tags used for syncing
+                if tag_objects:
+                    market.tags.add(*tag_objects)
+
                 synced.append(market)
 
         except Exception as e:
