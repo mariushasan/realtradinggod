@@ -1,0 +1,248 @@
+{% extends 'markets/base.html' %}
+
+{% block title %}Dashboard - Arbitrage Analyzer{% endblock %}
+
+{% block content %}
+<div class="stats-grid">
+    <div class="stat-card">
+        <h3>Opportunities</h3>
+        <div class="value green">{{ total_opportunities }}</div>
+    </div>
+    <div class="stat-card">
+        <h3>Kalshi Markets</h3>
+        <div class="value">{{ kalshi_count }}</div>
+    </div>
+    <div class="stat-card">
+        <h3>Polymarket Markets</h3>
+        <div class="value">{{ poly_count }}</div>
+    </div>
+    <div class="stat-card">
+        <h3>Cross-Exchange Matches</h3>
+        <div class="value">{{ match_count }}</div>
+    </div>
+</div>
+
+<div class="section-header">
+    <h2>Actions</h2>
+    <div>
+        <button class="btn primary" onclick="syncMarkets()" id="syncBtn">
+            Sync Markets
+            <span class="loading" id="syncLoading">...</span>
+        </button>
+        <button class="btn" onclick="refreshArbitrage()" id="refreshBtn">
+            Refresh Arbitrage
+            <span class="loading" id="refreshLoading">...</span>
+        </button>
+    </div>
+</div>
+
+{% if cross_exchange %}
+<div class="section-header">
+    <h2>Cross-Exchange Opportunities</h2>
+</div>
+<table>
+    <thead>
+        <tr>
+            <th>Kalshi Market</th>
+            <th>Polymarket Market</th>
+            <th>Positions</th>
+            <th>Profit %</th>
+            <th>EV</th>
+            <th>Match Status</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for opp in cross_exchange %}
+        <tr>
+            <td>
+                <a href="{{ opp.market_match.kalshi_market.url }}" target="_blank">
+                    {{ opp.market_match.kalshi_market.title|truncatechars:50 }}
+                </a>
+            </td>
+            <td>
+                <a href="{{ opp.market_match.polymarket_market.url }}" target="_blank">
+                    {{ opp.market_match.polymarket_market.title|truncatechars:50 }}
+                </a>
+            </td>
+            <td class="positions-list">
+                {% for pos in opp.positions.positions %}
+                <div class="position">
+                    <span class="exchange-badge {{ pos.exchange }}">{{ pos.exchange }}</span>
+                    {{ pos.outcome }} @ {{ pos.price|floatformat:2 }}
+                </div>
+                {% endfor %}
+            </td>
+            <td class="profit {% if opp.profit_percent > 5 %}high{% endif %}">
+                +{{ opp.profit_percent|floatformat:2 }}%
+            </td>
+            <td>{{ opp.expected_value|floatformat:3 }}</td>
+            <td>
+                {% if opp.market_match.is_verified %}
+                <span style="color: #22c55e;">Verified</span>
+                {% else %}
+                <span style="color: #fbbf24;">Unverified</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+{% if kalshi_only %}
+<div class="section-header">
+    <h2>Kalshi-Only Opportunities</h2>
+</div>
+<table>
+    <thead>
+        <tr>
+            <th>Market</th>
+            <th>Positions</th>
+            <th>Total Cost</th>
+            <th>Profit %</th>
+            <th>EV</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for opp in kalshi_only %}
+        <tr>
+            <td>
+                {% for market in opp.markets.all %}
+                <a href="{{ market.url }}" target="_blank">
+                    {{ market.title|truncatechars:60 }}
+                </a>
+                {% endfor %}
+            </td>
+            <td class="positions-list">
+                {% for pos in opp.positions.positions %}
+                <div class="position">
+                    {{ pos.outcome }} @ {{ pos.price|floatformat:2 }}
+                </div>
+                {% endfor %}
+            </td>
+            <td>{{ opp.positions.total_cost|floatformat:2 }}</td>
+            <td class="profit {% if opp.profit_percent > 5 %}high{% endif %}">
+                +{{ opp.profit_percent|floatformat:2 }}%
+            </td>
+            <td>{{ opp.expected_value|floatformat:3 }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+{% if poly_only %}
+<div class="section-header">
+    <h2>Polymarket-Only Opportunities</h2>
+</div>
+<table>
+    <thead>
+        <tr>
+            <th>Market</th>
+            <th>Positions</th>
+            <th>Total Cost</th>
+            <th>Profit %</th>
+            <th>EV</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for opp in poly_only %}
+        <tr>
+            <td>
+                {% for market in opp.markets.all %}
+                <a href="{{ market.url }}" target="_blank">
+                    {{ market.title|truncatechars:60 }}
+                </a>
+                {% endfor %}
+            </td>
+            <td class="positions-list">
+                {% for pos in opp.positions.positions %}
+                <div class="position">
+                    {{ pos.outcome }} @ {{ pos.price|floatformat:2 }}
+                </div>
+                {% endfor %}
+            </td>
+            <td>{{ opp.positions.total_cost|floatformat:2 }}</td>
+            <td class="profit {% if opp.profit_percent > 5 %}high{% endif %}">
+                +{{ opp.profit_percent|floatformat:2 }}%
+            </td>
+            <td>{{ opp.expected_value|floatformat:3 }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+{% if not cross_exchange and not kalshi_only and not poly_only %}
+<div class="empty-state">
+    <p>No arbitrage opportunities found.</p>
+    <p>Click "Sync Markets" to fetch latest data from exchanges.</p>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+    async function syncMarkets() {
+        const btn = document.getElementById('syncBtn');
+        const loading = document.getElementById('syncLoading');
+
+        btn.disabled = true;
+        loading.style.display = 'inline';
+
+        try {
+            const response = await fetch('{% url "markets:sync_markets" %}', {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': getCookie('csrftoken'),
+                }
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                showToast(`Synced: ${data.kalshi_synced} Kalshi, ${data.polymarket_synced} Polymarket, ${data.matches_found} matches, ${data.opportunities_found} opportunities`);
+                setTimeout(() => location.reload(), 1500);
+            } else {
+                showToast('Error: ' + data.error, 'error');
+            }
+        } catch (e) {
+            showToast('Network error: ' + e.message, 'error');
+        } finally {
+            btn.disabled = false;
+            loading.style.display = 'none';
+        }
+    }
+
+    async function refreshArbitrage() {
+        const btn = document.getElementById('refreshBtn');
+        const loading = document.getElementById('refreshLoading');
+
+        btn.disabled = true;
+        loading.style.display = 'inline';
+
+        try {
+            const response = await fetch('{% url "markets:refresh_arbitrage" %}', {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': getCookie('csrftoken'),
+                }
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                showToast(`Found ${data.opportunities_found} arbitrage opportunities`);
+                setTimeout(() => location.reload(), 1500);
+            } else {
+                showToast('Error: ' + data.error, 'error');
+            }
+        } catch (e) {
+            showToast('Network error: ' + e.message, 'error');
+        } finally {
+            btn.disabled = false;
+            loading.style.display = 'none';
+        }
+    }
+</script>
+{% endblock %}

@@ -1,0 +1,135 @@
+{% extends 'markets/base.html' %}
+
+{% block title %}Market Matches - Arbitrage Analyzer{% endblock %}
+
+{% block content %}
+<div class="section-header">
+    <h2>Cross-Exchange Market Matches</h2>
+</div>
+
+<div class="filters">
+    <form method="get">
+        <select name="verified" onchange="this.form.submit()">
+            <option value="">All Matches</option>
+            <option value="true" {% if verified_filter == 'true' %}selected{% endif %}>Verified Only</option>
+            <option value="false" {% if verified_filter == 'false' %}selected{% endif %}>Unverified Only</option>
+        </select>
+    </form>
+</div>
+
+{% if matches %}
+<table>
+    <thead>
+        <tr>
+            <th>Kalshi Market</th>
+            <th>Polymarket Market</th>
+            <th>Similarity</th>
+            <th>Match Reason</th>
+            <th>Status</th>
+            <th>Action</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for match in matches %}
+        <tr id="match-{{ match.id }}">
+            <td>
+                <a href="{{ match.kalshi_market.url }}" target="_blank">
+                    {{ match.kalshi_market.title|truncatechars:40 }}
+                </a>
+                <div class="positions-list" style="margin-top: 5px;">
+                    {% for outcome in match.kalshi_market.outcomes %}
+                    <span>{{ outcome.name }}: {{ outcome.price|floatformat:2 }}</span>
+                    {% endfor %}
+                </div>
+            </td>
+            <td>
+                <a href="{{ match.polymarket_market.url }}" target="_blank">
+                    {{ match.polymarket_market.title|truncatechars:40 }}
+                </a>
+                <div class="positions-list" style="margin-top: 5px;">
+                    {% for outcome in match.polymarket_market.outcomes %}
+                    <span>{{ outcome.name }}: {{ outcome.price|floatformat:2 }}</span>
+                    {% endfor %}
+                </div>
+            </td>
+            <td>
+                {% if match.similarity_score >= 0.8 %}
+                <span class="similarity high">{{ match.similarity_score|floatformat:0|add:"0" }}%</span>
+                {% elif match.similarity_score >= 0.7 %}
+                <span class="similarity medium">{{ match.similarity_score|floatformat:0|add:"0" }}%</span>
+                {% else %}
+                <span class="similarity low">{{ match.similarity_score|floatformat:0|add:"0" }}%</span>
+                {% endif %}
+            </td>
+            <td class="match-reason">
+                {{ match.match_reason }}
+            </td>
+            <td id="status-{{ match.id }}">
+                {% if match.is_verified %}
+                <span style="color: #22c55e;">Verified</span>
+                {% else %}
+                <span style="color: #888;">Unverified</span>
+                {% endif %}
+            </td>
+            <td>
+                <button
+                    class="btn verify-btn {% if match.is_verified %}verified{% endif %}"
+                    onclick="toggleVerify({{ match.id }})"
+                    id="btn-{{ match.id }}"
+                >
+                    {% if match.is_verified %}Unverify{% else %}Verify{% endif %}
+                </button>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="empty-state">
+    <p>No market matches found.</p>
+    <p>Sync markets from the dashboard to find cross-exchange matches.</p>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+    async function toggleVerify(matchId) {
+        const btn = document.getElementById('btn-' + matchId);
+        const status = document.getElementById('status-' + matchId);
+
+        btn.disabled = true;
+
+        try {
+            const response = await fetch(`/api/verify/${matchId}/`, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': getCookie('csrftoken'),
+                }
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                if (data.is_verified) {
+                    btn.textContent = 'Unverify';
+                    btn.classList.add('verified');
+                    status.innerHTML = '<span style="color: #22c55e;">Verified</span>';
+                    showToast('Match verified successfully');
+                } else {
+                    btn.textContent = 'Verify';
+                    btn.classList.remove('verified');
+                    status.innerHTML = '<span style="color: #888;">Unverified</span>';
+                    showToast('Match unverified');
+                }
+            } else {
+                showToast('Error: ' + data.error, 'error');
+            }
+        } catch (e) {
+            showToast('Network error: ' + e.message, 'error');
+        } finally {
+            btn.disabled = false;
+        }
+    }
+</script>
+{% endblock %}

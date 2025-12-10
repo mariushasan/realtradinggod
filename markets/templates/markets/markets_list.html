@@ -1,0 +1,60 @@
+{% extends 'markets/base.html' %}
+
+{% block title %}Markets - Arbitrage Analyzer{% endblock %}
+
+{% block content %}
+<div class="section-header">
+    <h2>All Markets</h2>
+</div>
+
+<div class="filters">
+    <form method="get">
+        <select name="exchange" onchange="this.form.submit()">
+            <option value="">All Exchanges</option>
+            {% for value, label in exchanges %}
+            <option value="{{ value }}" {% if exchange_filter == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+    </form>
+</div>
+
+{% if markets %}
+<table>
+    <thead>
+        <tr>
+            <th>Exchange</th>
+            <th>Title</th>
+            <th>Outcomes</th>
+            <th>Updated</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for market in markets %}
+        <tr>
+            <td>
+                <span class="exchange-badge {{ market.exchange }}">{{ market.get_exchange_display }}</span>
+            </td>
+            <td>
+                <a href="{{ market.url }}" target="_blank">
+                    {{ market.title|truncatechars:70 }}
+                </a>
+            </td>
+            <td class="positions-list">
+                {% for outcome in market.outcomes %}
+                <div class="position">
+                    {{ outcome.name }}: {{ outcome.price|floatformat:2 }}
+                </div>
+                {% endfor %}
+            </td>
+            <td>{{ market.updated_at|timesince }} ago</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="empty-state">
+    <p>No markets found.</p>
+    <p>Sync markets from the dashboard to populate this list.</p>
+</div>
+{% endif %}
+{% endblock %}
