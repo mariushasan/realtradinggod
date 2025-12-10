@@ -49,8 +49,9 @@ class MarketSyncService:
                         {'name': 'No', 'price': no_ask}
                     ]
 
-                    # Build URL
-                    url = f"https://kalshi.com/markets/{ticker.lower()}"
+                    # Build URL - Kalshi uses event ticker in URL
+                    # Format: https://kalshi.com/markets/EVENT_TICKER
+                    url = f"https://kalshi.com/markets/{event_ticker}"
 
                     # Parse close time
                     close_time = None
@@ -136,6 +137,7 @@ class MarketSyncService:
                         })
 
                 # Build URL from slug
+                # Polymarket URL format: https://polymarket.com/event/[slug]
                 slug = market_data.get('slug', '')
                 url = f"https://polymarket.com/event/{slug}" if slug else ''
 
@@ -154,7 +156,7 @@ class MarketSyncService:
                     exchange=Exchange.POLYMARKET,
                     external_id=condition_id,
                     defaults={
-                        'event_external_id': market_data.get('event_slug', ''),
+                        'event_external_id': slug,  # Store slug for URL building
                         'title': market_data.get('question', market_data.get('title', '')),
                         'description': market_data.get('description', ''),
                         'outcomes': outcomes,
