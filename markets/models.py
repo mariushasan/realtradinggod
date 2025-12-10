@@ -6,6 +6,32 @@ class Exchange(models.TextChoices):
     POLYMARKET = 'polymarket', 'Polymarket'
 
 
+class Tag(models.Model):
+    """Tag for categorizing markets on exchanges"""
+    exchange = models.CharField(max_length=20, choices=Exchange.choices)
+
+    # External identifier from the API (not our primary key)
+    external_id = models.CharField(max_length=255, blank=True, help_text="API's internal ID")
+
+    # Tag info
+    label = models.CharField(max_length=255)  # Display name
+    slug = models.CharField(max_length=255, blank=True)  # URL-friendly identifier (Polymarket)
+    category = models.CharField(max_length=255, blank=True)  # Category name (Kalshi)
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ['exchange', 'label', 'category']
+        ordering = ['exchange', 'category', 'label']
+
+    def __str__(self):
+        if self.category:
+            return f"[{self.exchange}] {self.category}: {self.label}"
+        return f"[{self.exchange}] {self.label}"
+
+
 class Market(models.Model):
     """Single market from either Kalshi or Polymarket"""
     exchange = models.CharField(max_length=20, choices=Exchange.choices)

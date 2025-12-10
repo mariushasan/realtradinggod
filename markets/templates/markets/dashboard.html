@@ -24,10 +24,16 @@
 
 <div class="section-header">
     <h2>Sync Markets</h2>
-    <button class="btn" onclick="loadTags()" id="loadTagsBtn">
-        Load Tags
-        <span class="loading" id="loadTagsLoading">...</span>
-    </button>
+    <div>
+        <button class="btn" onclick="loadTags()" id="loadTagsBtn">
+            Load Tags
+            <span class="loading" id="loadTagsLoading">...</span>
+        </button>
+        <button class="btn" onclick="refreshTags()" id="refreshTagsBtn">
+            Refresh Tags from API
+            <span class="loading" id="refreshTagsLoading">...</span>
+        </button>
+    </div>
 </div>
 
 <div class="tag-filters">
@@ -222,9 +228,45 @@
                 renderKalshiTags(data.kalshi);
                 renderPolymarketTags(data.polymarket);
                 tagsLoaded = true;
-                showToast(`Loaded ${data.kalshi.length} Kalshi tags, ${data.polymarket.length} Polymarket tags`);
+                if (data.kalshi.length === 0 && data.polymarket.length === 0) {
+                    showToast('No tags in database. Click "Refresh Tags from API" to fetch them.', 'error');
+                } else {
+                    showToast(`Loaded ${data.kalshi.length} Kalshi tags, ${data.polymarket.length} Polymarket tags`);
+                }
             } else {
                 showToast('Error loading tags: ' + data.error, 'error');
+            }
+        } catch (e) {
+            showToast('Network error: ' + e.message, 'error');
+        } finally {
+            btn.disabled = false;
+            loading.style.display = 'none';
+        }
+    }
+
+    async function refreshTags() {
+        const btn = document.getElementById('refreshTagsBtn');
+        const loading = document.getElementById('refreshTagsLoading');
+
+        btn.disabled = true;
+        loading.style.display = 'inline';
+
+        try {
+            const response = await fetch('{% url "markets:refresh_tags" %}', {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': getCookie('csrftoken'),
+                }
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                showToast(`Synced ${data.kalshi_synced} Kalshi tags, ${data.polymarket_synced} Polymarket tags`);
+                // Auto-load tags after refresh
+                await loadTags();
+            } else {
+                showToast('Error refreshing tags: ' + data.error, 'error');
             }
         } catch (e) {
             showToast('Network error: ' + e.message, 'error');
@@ -237,7 +279,7 @@
     function renderKalshiTags(tags) {
         const container = document.getElementById('kalshiTags');
         if (!tags || tags.length === 0) {
-            container.innerHTML = '<span class="no-tags">No tags available</span>';
+            container.innerHTML = '<span class="no-tags">No tags available. Click "Refresh Tags from API" to fetch them.</span>';
             return;
         }
 
@@ -255,10 +297,10 @@
                 <span class="category-label">${category}</span>
                 <div class="category-tags">`;
             categoryTags.forEach(tag => {
+                // Use slug as the value for filtering (Kalshi uses tag labels to filter)
                 html += `<label class="tag-checkbox">
-                    <input type="checkbox" name="kalshi_tag" value="${tag.id}">
+                    <input type="checkbox" name="kalshi_tag" value="${tag.slug}" data-label="${tag.label}">
                     <span class="tag-label">${tag.label}</span>
-                    <span class="tag-count">(${tag.count})</span>
                 </label>`;
             });
             html += '</div></div>';
@@ -269,14 +311,15 @@
     function renderPolymarketTags(tags) {
         const container = document.getElementById('polymarketTags');
         if (!tags || tags.length === 0) {
-            container.innerHTML = '<span class="no-tags">No tags available</span>';
+            container.innerHTML = '<span class="no-tags">No tags available. Click "Refresh Tags from API" to fetch them.</span>';
             return;
         }
 
         let html = '<div class="category-tags">';
         tags.forEach(tag => {
+            // Use external_id as the value (Polymarket uses tag ID to filter)
             html += `<label class="tag-checkbox">
-                <input type="checkbox" name="polymarket_tag" value="${tag.id}">
+                <input type="checkbox" name="polymarket_tag" value="${tag.external_id}" data-label="${tag.label}">
                 <span class="tag-label">${tag.label}</span>
             </label>`;
         });

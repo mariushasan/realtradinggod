@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from django.utils import timezone
 
-from markets.models import Market, Exchange
+from markets.models import Market, Exchange, Tag
 from markets.api import KalshiClient, PolymarketClient
 
 logger = logging.getLogger(__name__)
@@ -19,29 +19,95 @@ class MarketSyncService:
         self.kalshi_client = KalshiClient()
         self.poly_client = PolymarketClient()
 
-    def get_kalshi_tags(self) -> dict:
-        """Get available Kalshi tags organized by categories"""
+    def sync_kalshi_tags(self) -> List[Tag]:
+        """Fetch Kalshi tags from API and save to database"""
+        synced = []
         try:
             response = self.kalshi_client.get_tags_by_categories()
-            # Handle case where response might be a string or unexpected format
-            if isinstance(response, dict):
-                return response.get('tags_by_categories', {})
-            return {}
-        except Exception as e:
-            logger.error(f"Error fetching Kalshi tags: {e}")
-            return {}
+            if not isinstance(response, dict):
+                return synced
 
-    def get_polymarket_tags(self) -> list:
-        """Get available Polymarket tags"""
-        try:
-            result = self.poly_client.get_tags()
-            # Ensure we return a list
-            if isinstance(result, list):
-                return result
-            return []
+            tags_by_categories = response.get('tags_by_categories', {})
+            if not isinstance(tags_by_categories, dict):
+                return synced
+
+            for category, tag_labels in tags_by_categories.items():
+                # Skip None or empty categories
+                if not tag_labels or not isinstance(tag_labels, list):
+                    continue
+
+                for label in tag_labels:
+                    if not isinstance(label, str) or not label.strip():
+                        continue
+
+                    tag, created = Tag.objects.update_or_create(
+                        exchange=Exchange.KALSHI,
+                        label=label.strip(),
+                        category=category,
+                        defaults={
+                            'slug': label.strip().lower().replace(' ', '-'),
+                            'external_id': ''  # Kalshi tags don't have IDs
+                        }
+                    )
+                    synced.append(tag)
+
+            logger.info(f"Synced {len(synced)} Kalshi tags")
         except Exception as e:
-            logger.error(f"Error fetching Polymarket tags: {e}")
-            return []
+            logger.error(f"Error syncing Kalshi tags: {e}")
+
+        return synced
+
+    def sync_polymarket_tags(self) -> List[Tag]:
+        """Fetch Polymarket tags from API and save to database"""
+        synced = []
+        try:
+            tags_data = self.poly_client.get_tags()
+            if not isinstance(tags_data, list):
+                return synced
+
+            for tag_data in tags_data:
+                if not isinstance(tag_data, dict):
+                    continue
+
+                # Skip hidden tags
+                if tag_data.get('forceHide', False):
+                    continue
+
+                label = tag_data.get('label', '').strip()
+                if not label:
+                    continue
+
+                tag, created = Tag.objects.update_or_create(
+                    exchange=Exchange.POLYMARKET,
+                    label=label,
+                    category='',  # Polymarket tags don't have categories
+                    defaults={
+                        'external_id': str(tag_data.get('id', '')),
+                        'slug': tag_data.get('slug', '')
+                    }
+                )
+                synced.append(tag)
+
+            logger.info(f"Synced {len(synced)} Polymarket tags")
+        except Exception as e:
+            logger.error(f"Error syncing Polymarket tags: {e}")
+
+        return synced
+
+    def sync_all_tags(self) -> Dict[str, List[Tag]]:
+        """Sync tags from both exchanges"""
+        return {
+            'kalshi': self.sync_kalshi_tags(),
+            'polymarket': self.sync_polymarket_tags()
+        }
+
+    def get_kalshi_tags_from_db(self) -> List[Tag]:
+        """Get Kalshi tags from database"""
+        return list(Tag.objects.filter(exchange=Exchange.KALSHI).order_by('category', 'label'))
+
+    def get_polymarket_tags_from_db(self) -> List[Tag]:
+        """Get Polymarket tags from database"""
+        return list(Tag.objects.filter(exchange=Exchange.POLYMARKET).order_by('label'))
 
     def sync_kalshi_markets(self, series_tickers: Optional[List[str]] = None) -> List[Market]:
         """Sync markets from Kalshi, optionally filtered by series tickers (tags)"""

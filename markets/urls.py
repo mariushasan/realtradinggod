@@ -9,6 +9,7 @@ urlpatterns = [
     path('matches/', views.MatchesListView.as_view(), name='matches_list'),
     path('api/sync/', views.sync_markets, name='sync_markets'),
     path('api/tags/', views.get_tags, name='get_tags'),
+    path('api/tags/refresh/', views.refresh_tags, name='refresh_tags'),
     path('api/verify/<int:match_id>/', views.verify_match, name='verify_match'),
     path('api/refresh/', views.refresh_arbitrage, name='refresh_arbitrage'),
 ]
