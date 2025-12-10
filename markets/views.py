@@ -206,20 +206,23 @@ def get_tags(request):
 
             # Format Kalshi tags: flatten categories into a list with category info
             kalshi_formatted = []
-            for category, tags in kalshi_tags.items():
-                for tag in tags:
-                    kalshi_formatted.append({
-                        'id': tag.get('tag', ''),
-                        'label': tag.get('label', ''),
-                        'category': category,
-                        'count': tag.get('count', 0)
-                    })
+            if isinstance(kalshi_tags, dict):
+                for category, tags in kalshi_tags.items():
+                    if isinstance(tags, list):
+                        for tag in tags:
+                            if isinstance(tag, dict):
+                                kalshi_formatted.append({
+                                    'id': tag.get('tag', ''),
+                                    'label': tag.get('label', ''),
+                                    'category': category,
+                                    'count': tag.get('count', 0)
+                                })
 
             # Format Polymarket tags
             polymarket_formatted = []
             if isinstance(polymarket_tags, list):
                 for tag in polymarket_tags:
-                    if not tag.get('forceHide', False):
+                    if isinstance(tag, dict) and not tag.get('forceHide', False):
                         polymarket_formatted.append({
                             'id': tag.get('id', ''),
                             'label': tag.get('label', ''),

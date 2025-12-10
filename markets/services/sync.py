@@ -23,7 +23,10 @@ class MarketSyncService:
         """Get available Kalshi tags organized by categories"""
         try:
             response = self.kalshi_client.get_tags_by_categories()
-            return response.get('tags_by_categories', {})
+            # Handle case where response might be a string or unexpected format
+            if isinstance(response, dict):
+                return response.get('tags_by_categories', {})
+            return {}
         except Exception as e:
             logger.error(f"Error fetching Kalshi tags: {e}")
             return {}
@@ -31,7 +34,11 @@ class MarketSyncService:
     def get_polymarket_tags(self) -> list:
         """Get available Polymarket tags"""
         try:
-            return self.poly_client.get_tags()
+            result = self.poly_client.get_tags()
+            # Ensure we return a list
+            if isinstance(result, list):
+                return result
+            return []
         except Exception as e:
             logger.error(f"Error fetching Polymarket tags: {e}")
             return []
