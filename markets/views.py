@@ -8,7 +8,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.utils import timezone
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 
-from .models import Market, MarketMatch, ArbitrageOpportunity, Exchange
+from .models import Market, MarketMatch, ArbitrageOpportunity, Exchange, Tag
 from .services import MarketMatcher, ArbitrageDetector, MarketSyncService
 
 
@@ -196,38 +196,32 @@ def sync_markets(request):
 
 @csrf_exempt
 def get_tags(request):
-    """Get available tags from both exchanges"""
+    """Get available tags from database"""
     if request.method == 'GET':
-        sync_service = MarketSyncService()
-
         try:
-            kalshi_tags = sync_service.get_kalshi_tags()
-            polymarket_tags = sync_service.get_polymarket_tags()
+            # Get tags from database
+            kalshi_tags = Tag.objects.filter(exchange=Exchange.KALSHI).order_by('category', 'label')
+            polymarket_tags = Tag.objects.filter(exchange=Exchange.POLYMARKET).order_by('label')
 
-            # Format Kalshi tags: flatten categories into a list with category info
+            # Format Kalshi tags
             kalshi_formatted = []
-            if isinstance(kalshi_tags, dict):
-                for category, tags in kalshi_tags.items():
-                    if isinstance(tags, list):
-                        for tag in tags:
-                            if isinstance(tag, dict):
-                                kalshi_formatted.append({
-                                    'id': tag.get('tag', ''),
-                                    'label': tag.get('label', ''),
-                                    'category': category,
-                                    'count': tag.get('count', 0)
-                                })
+            for tag in kalshi_tags:
+                kalshi_formatted.append({
+                    'id': tag.id,
+                    'label': tag.label,
+                    'slug': tag.slug,
+                    'category': tag.category,
+                })
 
             # Format Polymarket tags
             polymarket_formatted = []
-            if isinstance(polymarket_tags, list):
-                for tag in polymarket_tags:
-                    if isinstance(tag, dict) and not tag.get('forceHide', False):
-                        polymarket_formatted.append({
-                            'id': tag.get('id', ''),
-                            'label': tag.get('label', ''),
-                            'slug': tag.get('slug', '')
-                        })
+            for tag in polymarket_tags:
+                polymarket_formatted.append({
+                    'id': tag.id,
+                    'external_id': tag.external_id,
+                    'label': tag.label,
+                    'slug': tag.slug,
+                })
 
             return JsonResponse({
                 'success': True,
@@ -242,6 +236,30 @@ def get_tags(request):
             }, status=500)
 
     return JsonResponse({'error': 'GET required'}, status=405)
+
+
+@csrf_exempt
+def refresh_tags(request):
+    """Refresh tags from exchange APIs and save to database"""
+    if request.method == 'POST':
+        sync_service = MarketSyncService()
+
+        try:
+            results = sync_service.sync_all_tags()
+
+            return JsonResponse({
+                'success': True,
+                'kalshi_synced': len(results['kalshi']),
+                'polymarket_synced': len(results['polymarket']),
+            })
+
+        except Exception as e:
+            return JsonResponse({
+                'success': False,
+                'error': str(e)
+            }, status=500)
+
+    return JsonResponse({'error': 'POST required'}, status=405)
 
 
 @csrf_exempt
