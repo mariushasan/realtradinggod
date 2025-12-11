@@ -15,10 +15,13 @@ class KalshiClient:
     """Client for Kalshi API"""
 
     BASE_URL = 'https://api.elections.kalshi.com/trade-api/v2'
-    MAX_RETRIES = 3
-    RETRY_DELAY = 2
-    # Rate limit: 20 requests/second for reads. Use 60ms min interval (~16 req/sec) for safety margin
-    MIN_REQUEST_INTERVAL = 0.06
+    MAX_RETRIES = 5
+    RETRY_DELAY = 1
+    # Adaptive rate limiting settings
+    BASE_REQUEST_INTERVAL = 0.1  # Start with 100ms between requests
+    MAX_REQUEST_INTERVAL = 2.0   # Cap at 2 seconds
+    BACKOFF_MULTIPLIER = 2.0     # Double interval on 429
+    RECOVERY_FACTOR = 0.95       # Slowly decrease interval on success
 
     def __init__(self, api_key_id: str = None, private_key_pem: str = None):
         self.api_key_id = api_key_id or os.environ.get('KALSHI_API_KEY_ID', '').strip('"\'')
@@ -26,6 +29,7 @@ class KalshiClient:
 
         self.private_key = None
         self._last_request_time = 0.0  # For rate limiting
+        self._current_interval = self.BASE_REQUEST_INTERVAL  # Adaptive interval
         if private_key_str and len(private_key_str) > 100:  # Valid key should be much longer
             try:
                 # Strip quotes if present
@@ -73,16 +77,33 @@ class KalshiClient:
         return headers
 
     def _rate_limit(self):
-        """Enforce rate limiting between API requests"""
+        """Enforce adaptive rate limiting between API requests"""
         now = time.monotonic()
         elapsed = now - self._last_request_time
-        if elapsed < self.MIN_REQUEST_INTERVAL:
-            sleep_time = self.MIN_REQUEST_INTERVAL - elapsed
+        if elapsed < self._current_interval:
+            sleep_time = self._current_interval - elapsed
             time.sleep(sleep_time)
         self._last_request_time = time.monotonic()
 
+    def _backoff(self):
+        """Increase rate limit interval after hitting 429"""
+        old_interval = self._current_interval
+        self._current_interval = min(
+            self._current_interval * self.BACKOFF_MULTIPLIER,
+            self.MAX_REQUEST_INTERVAL
+        )
+        logger.info(f"Rate limit hit, increasing interval: {old_interval:.3f}s -> {self._current_interval:.3f}s")
+
+    def _recover(self):
+        """Slowly decrease rate limit interval after successful requests"""
+        if self._current_interval > self.BASE_REQUEST_INTERVAL:
+            self._current_interval = max(
+                self._current_interval * self.RECOVERY_FACTOR,
+                self.BASE_REQUEST_INTERVAL
+            )
+
     def _request(self, method: str, path: str, params: dict = None) -> dict:
-        """Make request to Kalshi API with retry logic and rate limiting"""
+        """Make request to Kalshi API with retry logic and adaptive rate limiting"""
         url = self.BASE_URL + path
 
         if params:
@@ -103,7 +124,23 @@ class KalshiClient:
                 # Enforce rate limiting before each request attempt
                 self._rate_limit()
                 response = requests.request(method, url, headers=headers, timeout=30)
+
+                # Handle 429 specifically with adaptive backoff
+                if response.status_code == 429:
+                    self._backoff()
+                    # Check for Retry-After header
+                    retry_after = response.headers.get('Retry-After')
+                    if retry_after:
+                        wait_time = float(retry_after)
+                    else:
+                        wait_time = self._current_interval * (attempt + 1)
+                    logger.warning(f"Kalshi API rate limited (429), waiting {wait_time:.2f}s before retry")
+                    time.sleep(wait_time)
+                    continue
+
                 response.raise_for_status()
+                # Successful request - slowly recover rate limit
+                self._recover()
                 return response.json()
             except requests.exceptions.RequestException as e:
                 last_error = e
