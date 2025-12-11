@@ -8,7 +8,6 @@ from django.utils import timezone
 
 from markets.models import Market, Exchange, Tag, TagMatch
 from markets.api import KalshiClient, PolymarketClient
-from markets.services.matcher import TagMatcher
 
 logger = logging.getLogger(__name__)
 
@@ -102,16 +101,6 @@ class MarketSyncService:
             'polymarket': self.sync_polymarket_tags(),
             'tag_matches': []
         }
-
-        # Auto-match tags after syncing
-        if auto_match:
-            try:
-                tag_matcher = TagMatcher()
-                tag_matches = tag_matcher.auto_match_all_tags()
-                result['tag_matches'] = tag_matches
-                logger.info(f"Created/updated {len(tag_matches)} tag matches")
-            except Exception as e:
-                logger.error(f"Error auto-matching tags: {e}")
 
         return result
 

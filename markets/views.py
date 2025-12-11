@@ -9,7 +9,7 @@ from django.utils import timezone
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 
 from .models import Market, MarketMatch, ArbitrageOpportunity, Exchange, Tag, TagMatch
-from .services import MarketMatcher, TagMatcher, ArbitrageDetector, MarketSyncService
+from .services import MarketMatcher, ArbitrageDetector, MarketSyncService
 from .api import PolymarketClient
 
 class DashboardView(View):
@@ -392,25 +392,13 @@ def create_tag_match(request):
                     'error': f'Polymarket tag with id {polymarket_tag_id} not found'
                 }, status=404)
 
-            # Calculate similarity score for the manual match
-            tag_matcher = TagMatcher()
-            kalshi_text = kalshi_tag.label
-            if kalshi_tag.category:
-                kalshi_text = f"{kalshi_tag.category} {kalshi_tag.label}"
-
-            score, breakdown = tag_matcher.compute_tag_similarity(
-                kalshi_text,
-                polymarket_tag.label
-            )
-            reason = tag_matcher.generate_tag_match_reason(breakdown)
-
             # Create or update the tag match
             tag_match, created = TagMatch.objects.update_or_create(
                 kalshi_tag=kalshi_tag,
                 polymarket_tag=polymarket_tag,
                 defaults={
-                    'similarity_score': score,
-                    'match_reason': f"Manual match | {reason}",
+                    'similarity_score': 1.0,
+                    'match_reason': f"Manual match",
                     'is_manual': True
                 }
             )
