@@ -20,16 +20,16 @@ class EventSyncService:
         self.poly_client = PolymarketClient()
 
     def sync_kalshi_tags(self) -> List[Tag]:
-        """Fetch Kalshi tags from API and save to database"""
-        synced = []
+        """Fetch Kalshi tags from API and save to database using bulk operations"""
+        tags_to_create = []
         try:
             response = self.kalshi_client.get_tags_by_categories()
             if not isinstance(response, dict):
-                return synced
+                return []
 
             tags_by_categories = response.get('tags_by_categories', {})
             if not isinstance(tags_by_categories, dict):
-                return synced
+                return []
 
             for category, tag_labels in tags_by_categories.items():
                 # Skip None or empty categories
@@ -40,30 +40,36 @@ class EventSyncService:
                     if not isinstance(label, str) or not label.strip():
                         continue
 
-                    tag, created = Tag.objects.update_or_create(
+                    tags_to_create.append(Tag(
                         exchange=Exchange.KALSHI,
                         label=label.strip(),
-                        category=category,
-                        defaults={
-                            'slug': label.strip(),
-                            'external_id': ''  # Kalshi tags don't have IDs
-                        }
-                    )
-                    synced.append(tag)
+                        category=category or '',
+                        slug=label.strip(),
+                        external_id=''  # Kalshi tags don't have IDs
+                    ))
 
-            logger.info(f"Synced {len(synced)} Kalshi tags")
+            if tags_to_create:
+                # Bulk create/update tags
+                Tag.objects.bulk_create(
+                    tags_to_create,
+                    update_conflicts=True,
+                    unique_fields=['exchange', 'label', 'category'],
+                    update_fields=['slug', 'external_id']
+                )
+
+            logger.info(f"Synced {len(tags_to_create)} Kalshi tags")
         except Exception as e:
             logger.error(f"Error syncing Kalshi tags: {e}")
 
-        return synced
+        return tags_to_create
 
     def sync_polymarket_tags(self) -> List[Tag]:
-        """Fetch Polymarket tags from API and save to database"""
-        synced = []
+        """Fetch Polymarket tags from API and save to database using bulk operations"""
+        tags_to_create = []
         try:
             tags_data = self.poly_client.get_tags()
             if not isinstance(tags_data, list):
-                return synced
+                return []
 
             for tag_data in tags_data:
                 if not isinstance(tag_data, dict):
@@ -77,22 +83,28 @@ class EventSyncService:
                 if not label:
                     continue
 
-                tag, created = Tag.objects.update_or_create(
+                tags_to_create.append(Tag(
                     exchange=Exchange.POLYMARKET,
                     label=label,
                     category='',  # Polymarket tags don't have categories
-                    defaults={
-                        'external_id': str(tag_data.get('id', '')),
-                        'slug': tag_data.get('slug', '')
-                    }
-                )
-                synced.append(tag)
+                    external_id=str(tag_data.get('id', '')),
+                    slug=tag_data.get('slug', '')
+                ))
 
-            logger.info(f"Synced {len(synced)} Polymarket tags")
+            if tags_to_create:
+                # Bulk create/update tags
+                Tag.objects.bulk_create(
+                    tags_to_create,
+                    update_conflicts=True,
+                    unique_fields=['exchange', 'label', 'category'],
+                    update_fields=['external_id', 'slug']
+                )
+
+            logger.info(f"Synced {len(tags_to_create)} Polymarket tags")
         except Exception as e:
             logger.error(f"Error syncing Polymarket tags: {e}")
 
-        return synced
+        return tags_to_create
 
     def sync_all_tags(self, auto_match: bool = True) -> Dict:
         """Sync tags from both exchanges"""
@@ -111,14 +123,16 @@ class EventSyncService:
         close_before: Optional[str] = None
     ) -> List[Event]:
         """
-        Sync events from Kalshi with their nested markets.
+        Sync events from Kalshi with their nested markets using bulk operations.
 
         Args:
             tag_slugs: Not used currently (Kalshi events don't filter by tags directly)
             close_after: ISO date string (YYYY-MM-DD) - only sync events with markets closing after this date
             close_before: ISO date string (YYYY-MM-DD) - not directly supported by Kalshi events API
         """
-        synced_events = []
+        events_to_create = []
+        markets_to_create = []
+        event_market_map = {}  # Maps event external_id to list of market data
 
         # Convert date strings to Unix timestamps for Kalshi API
         min_close_ts = None
@@ -134,14 +148,16 @@ class EventSyncService:
             events_data = self.kalshi_client.get_all_open_events(min_close_ts=min_close_ts)
             logger.info(f"Processing {len(events_data)} Kalshi events")
 
+            # First pass: prepare all event objects
             for event_data in events_data:
                 event_ticker = event_data.get('event_ticker', '')
                 if not event_ticker:
                     continue
 
+                markets = event_data.get('markets', [])
+
                 # Filter by close_before if provided (do it client-side since API doesn't support it)
                 if close_before:
-                    markets = event_data.get('markets', [])
                     if markets:
                         try:
                             close_before_dt = datetime.strptime(close_before, '%Y-%m-%d').replace(
@@ -168,7 +184,6 @@ class EventSyncService:
 
                 # Parse end date from the first market's close time
                 end_date = None
-                markets = event_data.get('markets', [])
                 if markets:
                     # Find the latest close time among markets
                     for market in markets:
@@ -189,28 +204,55 @@ class EventSyncService:
                 total_liquidity = sum(m.get('liquidity', 0) or 0 for m in markets)
                 total_open_interest = sum(m.get('open_interest', 0) or 0 for m in markets)
 
-                # Create or update Event
-                event, created = Event.objects.update_or_create(
+                # Create Event object (not saved yet)
+                events_to_create.append(Event(
                     exchange=Exchange.KALSHI,
                     external_id=event_ticker,
-                    defaults={
-                        'title': event_data.get('title', event_ticker),
-                        'description': event_data.get('sub_title', ''),
-                        'category': event_data.get('category', ''),
-                        'url': url,
-                        'volume': total_volume,
-                        'volume_24h': total_volume_24h,
-                        'liquidity': total_liquidity,
-                        'open_interest': total_open_interest,
-                        'is_active': True,
-                        'mutually_exclusive': event_data.get('mutually_exclusive', False),
-                        'end_date': end_date
-                    }
-                )
-                synced_events.append(event)
+                    title=event_data.get('title', event_ticker),
+                    description=event_data.get('sub_title', ''),
+                    category=event_data.get('category', ''),
+                    url=url,
+                    volume=total_volume,
+                    volume_24h=total_volume_24h,
+                    liquidity=total_liquidity,
+                    open_interest=total_open_interest,
+                    is_active=True,
+                    mutually_exclusive=event_data.get('mutually_exclusive', False),
+                    end_date=end_date
+                ))
 
-                # Sync nested markets for this event
-                for market_data in markets:
+                # Store market data for this event
+                event_market_map[event_ticker] = {
+                    'markets': markets,
+                    'url': url
+                }
+
+            # Bulk create/update events
+            if events_to_create:
+                Event.objects.bulk_create(
+                    events_to_create,
+                    update_conflicts=True,
+                    unique_fields=['exchange', 'external_id'],
+                    update_fields=[
+                        'title', 'description', 'category', 'url',
+                        'volume', 'volume_24h', 'liquidity', 'open_interest',
+                        'is_active', 'mutually_exclusive', 'end_date'
+                    ]
+                )
+
+            # Fetch all events from DB to get their IDs (needed for FK)
+            event_ids = {e.external_id: e for e in Event.objects.filter(
+                exchange=Exchange.KALSHI,
+                external_id__in=event_market_map.keys()
+            )}
+
+            # Second pass: prepare all market objects
+            for event_ticker, data in event_market_map.items():
+                event = event_ids.get(event_ticker)
+                if not event:
+                    continue
+
+                for market_data in data['markets']:
                     ticker = market_data.get('ticker', '')
                     if not ticker:
                         continue
@@ -241,32 +283,43 @@ class EventSyncService:
                         except Exception:
                             pass
 
-                    Market.objects.update_or_create(
+                    markets_to_create.append(Market(
                         exchange=Exchange.KALSHI,
                         external_id=ticker,
-                        defaults={
-                            'event': event,
-                            'event_external_id': event_ticker,
-                            'title': market_data.get('title', ticker),
-                            'description': market_data.get('rules_primary', ''),
-                            'outcomes': outcomes,
-                            'url': url,
-                            'volume': market_data.get('volume', 0) or 0,
-                            'volume_24h': market_data.get('volume_24h', 0) or 0,
-                            'liquidity': market_data.get('liquidity', 0) or 0,
-                            'open_interest': market_data.get('open_interest', 0) or 0,
-                            'is_active': market_data.get('status') in ['active', 'open'],
-                            'close_time': close_time
-                        }
-                    )
+                        event=event,
+                        event_external_id=event_ticker,
+                        title=market_data.get('title', ticker),
+                        description=market_data.get('rules_primary', ''),
+                        outcomes=outcomes,
+                        url=data['url'],
+                        volume=market_data.get('volume', 0) or 0,
+                        volume_24h=market_data.get('volume_24h', 0) or 0,
+                        liquidity=market_data.get('liquidity', 0) or 0,
+                        open_interest=market_data.get('open_interest', 0) or 0,
+                        is_active=market_data.get('status') in ['active', 'open'],
+                        close_time=close_time
+                    ))
 
-            logger.info(f"Synced {len(synced_events)} Kalshi events")
+            # Bulk create/update markets
+            if markets_to_create:
+                Market.objects.bulk_create(
+                    markets_to_create,
+                    update_conflicts=True,
+                    unique_fields=['exchange', 'external_id'],
+                    update_fields=[
+                        'event', 'event_external_id', 'title', 'description',
+                        'outcomes', 'url', 'volume', 'volume_24h', 'liquidity',
+                        'open_interest', 'is_active', 'close_time'
+                    ]
+                )
+
+            logger.info(f"Synced {len(events_to_create)} Kalshi events with {len(markets_to_create)} markets")
 
         except Exception as e:
             logger.error(f"Error syncing Kalshi events: {e}")
             raise
 
-        return synced_events
+        return events_to_create
 
     def sync_polymarket_events(
         self,
@@ -277,7 +330,7 @@ class EventSyncService:
         liquidity_min: Optional[float] = None
     ) -> List[Event]:
         """
-        Sync events from Polymarket with their nested markets.
+        Sync events from Polymarket with their nested markets using bulk operations.
 
         Args:
             tag_ids: List of tag IDs to filter by
@@ -286,7 +339,9 @@ class EventSyncService:
             volume_min: Minimum volume filter
             liquidity_min: Minimum liquidity filter
         """
-        synced_events = []
+        events_to_create = []
+        markets_to_create = []
+        event_market_map = {}  # Maps event external_id to list of market data
 
         # Convert date strings to ISO 8601 format for Polymarket API
         end_date_min = None
@@ -336,6 +391,7 @@ class EventSyncService:
 
             logger.info(f"Processing {len(events_data)} Polymarket events")
 
+            # First pass: prepare all event objects
             for event_data in events_data:
                 event_id = event_data.get('id', '')
                 slug = event_data.get('slug', '')
@@ -358,29 +414,56 @@ class EventSyncService:
                     except Exception:
                         pass
 
-                # Create or update Event
-                event, created = Event.objects.update_or_create(
+                # Create Event object (not saved yet)
+                events_to_create.append(Event(
                     exchange=Exchange.POLYMARKET,
                     external_id=external_id,
-                    defaults={
-                        'title': event_data.get('title', slug),
-                        'description': event_data.get('description', ''),
-                        'category': event_data.get('category', ''),
-                        'url': url,
-                        'volume': float(event_data.get('volume', 0) or 0),
-                        'volume_24h': float(event_data.get('volume24hr', 0) or 0),
-                        'liquidity': float(event_data.get('liquidity', 0) or 0),
-                        'open_interest': float(event_data.get('openInterest', 0) or 0),
-                        'is_active': event_data.get('active', True),
-                        'mutually_exclusive': event_data.get('negRisk', False),
-                        'end_date': end_date
-                    }
-                )
-                synced_events.append(event)
+                    title=event_data.get('title', slug),
+                    description=event_data.get('description', ''),
+                    category=event_data.get('category', ''),
+                    url=url,
+                    volume=float(event_data.get('volume', 0) or 0),
+                    volume_24h=float(event_data.get('volume24hr', 0) or 0),
+                    liquidity=float(event_data.get('liquidity', 0) or 0),
+                    open_interest=float(event_data.get('openInterest', 0) or 0),
+                    is_active=event_data.get('active', True),
+                    mutually_exclusive=event_data.get('negRisk', False),
+                    end_date=end_date
+                ))
 
-                # Sync nested markets for this event
-                markets_data = event_data.get('markets', [])
-                for market_data in markets_data:
+                # Store market data for this event
+                event_market_map[external_id] = {
+                    'markets': event_data.get('markets', []),
+                    'slug': slug
+                }
+
+            # Bulk create/update events
+            if events_to_create:
+                Event.objects.bulk_create(
+                    events_to_create,
+                    update_conflicts=True,
+                    unique_fields=['exchange', 'external_id'],
+                    update_fields=[
+                        'title', 'description', 'category', 'url',
+                        'volume', 'volume_24h', 'liquidity', 'open_interest',
+                        'is_active', 'mutually_exclusive', 'end_date'
+                    ]
+                )
+
+            # Fetch all events from DB to get their IDs (needed for FK)
+            event_ids = {e.external_id: e for e in Event.objects.filter(
+                exchange=Exchange.POLYMARKET,
+                external_id__in=event_market_map.keys()
+            )}
+
+            # Second pass: prepare all market objects
+            for external_id, data in event_market_map.items():
+                event = event_ids.get(external_id)
+                if not event:
+                    continue
+
+                slug = data['slug']
+                for market_data in data['markets']:
                     if not isinstance(market_data, dict):
                         continue
 
@@ -428,7 +511,6 @@ class EventSyncService:
                             })
 
                     # Build market URL
-                    market_slug = market_data.get('slug', '')
                     market_url = f"https://polymarket.com/event/{slug}" if slug else ''
 
                     # Parse close time
@@ -442,32 +524,43 @@ class EventSyncService:
                         except Exception:
                             pass
 
-                    Market.objects.update_or_create(
+                    markets_to_create.append(Market(
                         exchange=Exchange.POLYMARKET,
                         external_id=market_external_id,
-                        defaults={
-                            'event': event,
-                            'event_external_id': slug,
-                            'title': market_data.get('question', market_data.get('title', '')),
-                            'description': market_data.get('description', ''),
-                            'outcomes': outcomes,
-                            'url': market_url,
-                            'volume': float(market_data.get('volumeNum', market_data.get('volume', 0)) or 0),
-                            'volume_24h': float(market_data.get('volume24hr', 0) or 0),
-                            'liquidity': float(market_data.get('liquidityNum', market_data.get('liquidity', 0)) or 0),
-                            'open_interest': 0,
-                            'is_active': market_data.get('active', True),
-                            'close_time': close_time
-                        }
-                    )
+                        event=event,
+                        event_external_id=slug,
+                        title=market_data.get('question', market_data.get('title', '')),
+                        description=market_data.get('description', ''),
+                        outcomes=outcomes,
+                        url=market_url,
+                        volume=float(market_data.get('volumeNum', market_data.get('volume', 0)) or 0),
+                        volume_24h=float(market_data.get('volume24hr', 0) or 0),
+                        liquidity=float(market_data.get('liquidityNum', market_data.get('liquidity', 0)) or 0),
+                        open_interest=0,
+                        is_active=market_data.get('active', True),
+                        close_time=close_time
+                    ))
 
-            logger.info(f"Synced {len(synced_events)} Polymarket events")
+            # Bulk create/update markets
+            if markets_to_create:
+                Market.objects.bulk_create(
+                    markets_to_create,
+                    update_conflicts=True,
+                    unique_fields=['exchange', 'external_id'],
+                    update_fields=[
+                        'event', 'event_external_id', 'title', 'description',
+                        'outcomes', 'url', 'volume', 'volume_24h', 'liquidity',
+                        'open_interest', 'is_active', 'close_time'
+                    ]
+                )
+
+            logger.info(f"Synced {len(events_to_create)} Polymarket events with {len(markets_to_create)} markets")
 
         except Exception as e:
             logger.error(f"Error syncing Polymarket events: {e}")
             raise
 
-        return synced_events
+        return events_to_create
 
     def sync_all_events(
         self,
