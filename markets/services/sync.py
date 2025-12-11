@@ -164,7 +164,7 @@ class EventSyncService:
         self,
         events_batch: List[Event],
         market_data_batch: Dict[str, dict],
-        all_events: List[Event]
+        total_events: List[int]
     ) -> None:
         """Flush a batch of Kalshi events and their markets to the database"""
         if not events_batch:
@@ -172,7 +172,7 @@ class EventSyncService:
 
         # Bulk create events and get their IDs
         event_ids = self._bulk_create_events(events_batch, Exchange.KALSHI)
-        all_events.extend(events_batch)
+        total_events[0] += len(events_batch)
 
         # Create markets for this batch
         markets_to_create = []
@@ -231,7 +231,93 @@ class EventSyncService:
 
         # Bulk create markets
         self._bulk_create_markets(markets_to_create)
-        logger.info(f"Flushed batch: {len(events_batch)} events, {len(markets_to_create)} markets")
+        logger.info(f"Flushed batch: {len(events_batch)} events, {len(markets_to_create)} markets (total: {total_events[0]})")
+
+    def _process_kalshi_event(
+        self,
+        event_data: dict,
+        close_after_dt: Optional[datetime],
+        close_before_dt: Optional[datetime],
+        volume_min: Optional[float],
+        volume_max: Optional[float],
+        liquidity_min: Optional[float],
+        liquidity_max: Optional[float],
+        events_batch: List[Event],
+        market_data_batch: Dict[str, dict]
+    ) -> bool:
+        """Process a single Kalshi event and add to batch if it passes filters. Returns True if added."""
+        event_ticker = event_data.get('event_ticker', '')
+        if not event_ticker:
+            return False
+
+        markets = event_data.get('markets', [])
+
+        # Find the latest close time among markets for this event
+        event_close_time = None
+        for market in markets:
+            close_time_str = market.get('close_time')
+            if close_time_str:
+                try:
+                    market_close = datetime.fromisoformat(
+                        close_time_str.replace('Z', '+00:00')
+                    ).replace(tzinfo=None)
+                    if event_close_time is None or market_close > event_close_time:
+                        event_close_time = market_close
+                except Exception:
+                    pass
+
+        # Client-side date filtering
+        if close_after_dt and event_close_time:
+            if event_close_time < close_after_dt:
+                return False
+
+        if close_before_dt and event_close_time:
+            if event_close_time > close_before_dt:
+                return False
+
+        # Build URL
+        url = f"https://kalshi.com/markets/{event_ticker}"
+
+        # Calculate aggregated volume from markets
+        total_volume = sum(m.get('volume', 0) or 0 for m in markets)
+        total_volume_24h = sum(m.get('volume_24h', 0) or 0 for m in markets)
+        total_liquidity = sum(m.get('liquidity', 0) or 0 for m in markets)
+        total_open_interest = sum(m.get('open_interest', 0) or 0 for m in markets)
+
+        # Client-side volume/liquidity filtering
+        if volume_min is not None and total_volume < volume_min:
+            return False
+        if volume_max is not None and total_volume > volume_max:
+            return False
+        if liquidity_min is not None and total_liquidity < liquidity_min:
+            return False
+        if liquidity_max is not None and total_liquidity > liquidity_max:
+            return False
+
+        # Create Event object
+        events_batch.append(Event(
+            exchange=Exchange.KALSHI,
+            external_id=event_ticker,
+            title=event_data.get('title', event_ticker),
+            description=event_data.get('sub_title', ''),
+            category=event_data.get('category', ''),
+            url=url,
+            volume=total_volume,
+            volume_24h=total_volume_24h,
+            liquidity=total_liquidity,
+            open_interest=total_open_interest,
+            is_active=True,
+            mutually_exclusive=event_data.get('mutually_exclusive', False),
+            end_date=event_close_time
+        ))
+
+        # Store market data
+        market_data_batch[event_ticker] = {
+            'markets': markets,
+            'url': url
+        }
+
+        return True
 
     def sync_kalshi_events(
         self,
@@ -244,21 +330,13 @@ class EventSyncService:
         liquidity_max: Optional[float] = None
     ) -> List[Event]:
         """
-        Sync events from Kalshi with their nested markets using bulk operations.
-        Events are created in batches of BATCH_SIZE for better performance.
-
-        Args:
-            tag_slugs: List of tag labels to filter by (uses exact tag name to get series)
-            close_after: ISO date string (YYYY-MM-DD) - only sync events with markets closing after this date
-            close_before: ISO date string (YYYY-MM-DD) - not directly supported by Kalshi events API
-            volume_min: Minimum volume filter (client-side, API doesn't support)
-            volume_max: Maximum volume filter (client-side, API doesn't support)
-            liquidity_min: Minimum liquidity filter (client-side, API doesn't support)
-            liquidity_max: Maximum liquidity filter (client-side, API doesn't support)
+        Sync events from Kalshi with their nested markets.
+        Fetches and saves in batches to minimize memory usage.
         """
-        all_events = []  # Track all created events
-        events_batch = []  # Current batch of events
-        market_data_batch = {}  # Market data for current batch
+        total_events = [0]  # Use list to allow modification in nested function
+        events_batch = []
+        market_data_batch = {}
+        seen_tickers = set()
 
         # Convert date strings to Unix timestamps for Kalshi API
         min_close_ts = None
@@ -268,6 +346,22 @@ class EventSyncService:
                 min_close_ts = int(dt.timestamp())
             except ValueError:
                 logger.warning(f"Invalid close_after date format: {close_after}")
+
+        # Parse date filters for client-side filtering
+        close_after_dt = None
+        close_before_dt = None
+        if close_after:
+            try:
+                close_after_dt = datetime.strptime(close_after, '%Y-%m-%d')
+            except ValueError:
+                pass
+        if close_before:
+            try:
+                close_before_dt = datetime.strptime(close_before, '%Y-%m-%d').replace(
+                    hour=23, minute=59, second=59
+                )
+            except ValueError:
+                pass
 
         try:
             # If tags provided, first get series tickers for those tags
@@ -279,157 +373,154 @@ class EventSyncService:
                     logger.warning("No series found for the given tags")
                     return []
 
-            # Fetch events - either for specific series or all
-            regular_events = []
-            multivariate_events = []
-
+            # Fetch and process regular events page by page
             if series_tickers:
-                # Fetch events for each series ticker
                 for series_ticker in series_tickers:
-                    series_regular = self.kalshi_client.get_all_open_events(
-                        series_ticker=series_ticker,
+                    cursor = None
+                    while True:
+                        response = self.kalshi_client.get_events(
+                            status='open',
+                            cursor=cursor,
+                            with_nested_markets=True,
+                            series_ticker=series_ticker,
+                            min_close_ts=min_close_ts
+                        )
+                        events = response.get('events', [])
+
+                        for event_data in events:
+                            ticker = event_data.get('event_ticker', '')
+                            if ticker and ticker not in seen_tickers:
+                                seen_tickers.add(ticker)
+                                self._process_kalshi_event(
+                                    event_data, close_after_dt, close_before_dt,
+                                    volume_min, volume_max, liquidity_min, liquidity_max,
+                                    events_batch, market_data_batch
+                                )
+
+                                # Flush if batch is full
+                                if len(events_batch) >= BATCH_SIZE:
+                                    self._flush_kalshi_batch(events_batch, market_data_batch, total_events)
+                                    events_batch = []
+                                    market_data_batch = {}
+
+                        cursor = response.get('cursor')
+                        if not cursor or not events:
+                            break
+            else:
+                # Fetch all regular events page by page
+                cursor = None
+                while True:
+                    response = self.kalshi_client.get_events(
+                        status='open',
+                        cursor=cursor,
+                        with_nested_markets=True,
                         min_close_ts=min_close_ts
                     )
-                    regular_events.extend(series_regular)
+                    events = response.get('events', [])
 
-                    series_multi = self.kalshi_client.get_all_multivariate_events(
-                        series_ticker=series_ticker
-                    )
-                    multivariate_events.extend(series_multi)
+                    for event_data in events:
+                        ticker = event_data.get('event_ticker', '')
+                        if ticker and ticker not in seen_tickers:
+                            seen_tickers.add(ticker)
+                            self._process_kalshi_event(
+                                event_data, close_after_dt, close_before_dt,
+                                volume_min, volume_max, liquidity_min, liquidity_max,
+                                events_batch, market_data_batch
+                            )
+
+                            # Flush if batch is full
+                            if len(events_batch) >= BATCH_SIZE:
+                                self._flush_kalshi_batch(events_batch, market_data_batch, total_events)
+                                events_batch = []
+                                market_data_batch = {}
+
+                    cursor = response.get('cursor')
+                    if not cursor or not events:
+                        break
+
+                    logger.info(f"Fetched page of {len(events)} regular Kalshi events")
+
+            # Fetch and process multivariate events page by page
+            if series_tickers:
+                for series_ticker in series_tickers:
+                    cursor = None
+                    while True:
+                        response = self.kalshi_client.get_multivariate_events(
+                            cursor=cursor,
+                            with_nested_markets=True,
+                            series_ticker=series_ticker
+                        )
+                        events = response.get('events', [])
+
+                        for event_data in events:
+                            ticker = event_data.get('event_ticker', '')
+                            if ticker and ticker not in seen_tickers:
+                                seen_tickers.add(ticker)
+                                self._process_kalshi_event(
+                                    event_data, close_after_dt, close_before_dt,
+                                    volume_min, volume_max, liquidity_min, liquidity_max,
+                                    events_batch, market_data_batch
+                                )
+
+                                # Flush if batch is full
+                                if len(events_batch) >= BATCH_SIZE:
+                                    self._flush_kalshi_batch(events_batch, market_data_batch, total_events)
+                                    events_batch = []
+                                    market_data_batch = {}
+
+                        cursor = response.get('cursor')
+                        if not cursor or not events:
+                            break
             else:
-                # Fetch all events
-                regular_events = self.kalshi_client.get_all_open_events(min_close_ts=min_close_ts)
-                multivariate_events = self.kalshi_client.get_all_multivariate_events()
-
-            logger.info(f"Fetched {len(regular_events)} regular Kalshi events")
-            logger.info(f"Fetched {len(multivariate_events)} multivariate Kalshi events")
-
-            # Combine and deduplicate by event_ticker
-            seen_tickers = set()
-            events_data = []
-            for event in regular_events + multivariate_events:
-                ticker = event.get('event_ticker', '')
-                if ticker and ticker not in seen_tickers:
-                    seen_tickers.add(ticker)
-                    events_data.append(event)
-
-            logger.info(f"Processing {len(events_data)} total Kalshi events (deduplicated)")
-
-            # Parse date filters for client-side filtering
-            close_after_dt = None
-            close_before_dt = None
-            if close_after:
-                try:
-                    close_after_dt = datetime.strptime(close_after, '%Y-%m-%d')
-                except ValueError:
-                    pass
-            if close_before:
-                try:
-                    close_before_dt = datetime.strptime(close_before, '%Y-%m-%d').replace(
-                        hour=23, minute=59, second=59
+                # Fetch all multivariate events page by page
+                cursor = None
+                while True:
+                    response = self.kalshi_client.get_multivariate_events(
+                        cursor=cursor,
+                        with_nested_markets=True
                     )
-                except ValueError:
-                    pass
+                    events = response.get('events', [])
 
-            # Process events and batch them
-            for event_data in events_data:
-                event_ticker = event_data.get('event_ticker', '')
-                if not event_ticker:
-                    continue
+                    for event_data in events:
+                        ticker = event_data.get('event_ticker', '')
+                        if ticker and ticker not in seen_tickers:
+                            seen_tickers.add(ticker)
+                            self._process_kalshi_event(
+                                event_data, close_after_dt, close_before_dt,
+                                volume_min, volume_max, liquidity_min, liquidity_max,
+                                events_batch, market_data_batch
+                            )
 
-                markets = event_data.get('markets', [])
+                            # Flush if batch is full
+                            if len(events_batch) >= BATCH_SIZE:
+                                self._flush_kalshi_batch(events_batch, market_data_batch, total_events)
+                                events_batch = []
+                                market_data_batch = {}
 
-                # Find the latest close time among markets for this event
-                event_close_time = None
-                for market in markets:
-                    close_time_str = market.get('close_time')
-                    if close_time_str:
-                        try:
-                            market_close = datetime.fromisoformat(
-                                close_time_str.replace('Z', '+00:00')
-                            ).replace(tzinfo=None)
-                            if event_close_time is None or market_close > event_close_time:
-                                event_close_time = market_close
-                        except Exception:
-                            pass
+                    cursor = response.get('cursor')
+                    if not cursor or not events:
+                        break
 
-                # Client-side date filtering (multivariate events don't support API filtering)
-                if close_after_dt and event_close_time:
-                    if event_close_time < close_after_dt:
-                        continue  # Event closes before the "closes after" date, skip it
-
-                if close_before_dt and event_close_time:
-                    if event_close_time > close_before_dt:
-                        continue  # Event closes after the "closes before" date, skip it
-
-                # Build URL - Kalshi uses event ticker in URL
-                url = f"https://kalshi.com/markets/{event_ticker}"
-
-                # Use the already computed event_close_time as end_date
-                end_date = event_close_time
-
-                # Calculate aggregated volume from markets
-                total_volume = sum(m.get('volume', 0) or 0 for m in markets)
-                total_volume_24h = sum(m.get('volume_24h', 0) or 0 for m in markets)
-                total_liquidity = sum(m.get('liquidity', 0) or 0 for m in markets)
-                total_open_interest = sum(m.get('open_interest', 0) or 0 for m in markets)
-
-                # Client-side volume/liquidity filtering (Kalshi API doesn't support these)
-                if volume_min is not None and total_volume < volume_min:
-                    continue
-                if volume_max is not None and total_volume > volume_max:
-                    continue
-                if liquidity_min is not None and total_liquidity < liquidity_min:
-                    continue
-                if liquidity_max is not None and total_liquidity > liquidity_max:
-                    continue
-
-                # Create Event object (not saved yet)
-                events_batch.append(Event(
-                    exchange=Exchange.KALSHI,
-                    external_id=event_ticker,
-                    title=event_data.get('title', event_ticker),
-                    description=event_data.get('sub_title', ''),
-                    category=event_data.get('category', ''),
-                    url=url,
-                    volume=total_volume,
-                    volume_24h=total_volume_24h,
-                    liquidity=total_liquidity,
-                    open_interest=total_open_interest,
-                    is_active=True,
-                    mutually_exclusive=event_data.get('mutually_exclusive', False),
-                    end_date=end_date
-                ))
-
-                # Store market data for this event
-                market_data_batch[event_ticker] = {
-                    'markets': markets,
-                    'url': url
-                }
-
-                # Flush batch if we've reached the batch size
-                if len(events_batch) >= BATCH_SIZE:
-                    self._flush_kalshi_batch(events_batch, market_data_batch, all_events)
-                    events_batch = []
-                    market_data_batch = {}
+                    logger.info(f"Fetched page of {len(events)} multivariate Kalshi events")
 
             # Flush any remaining events
             if events_batch:
-                self._flush_kalshi_batch(events_batch, market_data_batch, all_events)
+                self._flush_kalshi_batch(events_batch, market_data_batch, total_events)
 
-            logger.info(f"Synced {len(all_events)} Kalshi events total")
+            logger.info(f"Synced {total_events[0]} Kalshi events total")
 
         except Exception as e:
             logger.error(f"Error syncing Kalshi events: {e}")
             raise
 
-        return all_events
+        # Return empty list (we track count, not actual objects to save memory)
+        return [None] * total_events[0]  # Return placeholder list with correct count
 
     def _flush_polymarket_batch(
         self,
         events_batch: List[Event],
         market_data_batch: Dict[str, dict],
-        all_events: List[Event]
+        total_events: List[int]
     ) -> None:
         """Flush a batch of Polymarket events and their markets to the database"""
         if not events_batch:
@@ -437,7 +528,7 @@ class EventSyncService:
 
         # Bulk create events and get their IDs
         event_ids = self._bulk_create_events(events_batch, Exchange.POLYMARKET)
-        all_events.extend(events_batch)
+        total_events[0] += len(events_batch)
 
         # Create markets for this batch
         markets_to_create = []
@@ -527,7 +618,60 @@ class EventSyncService:
 
         # Bulk create markets
         self._bulk_create_markets(markets_to_create)
-        logger.info(f"Flushed batch: {len(events_batch)} events, {len(markets_to_create)} markets")
+        logger.info(f"Flushed batch: {len(events_batch)} events, {len(markets_to_create)} markets (total: {total_events[0]})")
+
+    def _process_polymarket_event(
+        self,
+        event_data: dict,
+        events_batch: List[Event],
+        market_data_batch: Dict[str, dict]
+    ) -> bool:
+        """Process a single Polymarket event and add to batch. Returns True if added."""
+        event_id = event_data.get('id', '')
+        slug = event_data.get('slug', '')
+        if not event_id and not slug:
+            return False
+
+        external_id = event_id or slug
+
+        # Build URL
+        url = f"https://polymarket.com/event/{slug}" if slug else ''
+
+        # Parse end date
+        end_date = None
+        end_date_str = event_data.get('endDate')
+        if end_date_str:
+            try:
+                end_date = datetime.fromisoformat(
+                    end_date_str.replace('Z', '+00:00')
+                )
+            except Exception:
+                pass
+
+        # Create Event object
+        events_batch.append(Event(
+            exchange=Exchange.POLYMARKET,
+            external_id=external_id,
+            title=event_data.get('title', slug),
+            description=event_data.get('description', ''),
+            category=event_data.get('category', ''),
+            url=url,
+            volume=float(event_data.get('volume', 0) or 0),
+            volume_24h=float(event_data.get('volume24hr', 0) or 0),
+            liquidity=float(event_data.get('liquidity', 0) or 0),
+            open_interest=float(event_data.get('openInterest', 0) or 0),
+            is_active=event_data.get('active', True),
+            mutually_exclusive=event_data.get('negRisk', False),
+            end_date=end_date
+        ))
+
+        # Store market data
+        market_data_batch[external_id] = {
+            'markets': event_data.get('markets', []),
+            'slug': slug
+        }
+
+        return True
 
     def sync_polymarket_events(
         self,
@@ -540,21 +684,13 @@ class EventSyncService:
         liquidity_max: Optional[float] = None
     ) -> List[Event]:
         """
-        Sync events from Polymarket with their nested markets using bulk operations.
-        Events are created in batches of BATCH_SIZE for better performance.
-
-        Args:
-            tag_ids: List of tag IDs to filter by
-            close_after: ISO date string (YYYY-MM-DD) - only sync events closing after this date
-            close_before: ISO date string (YYYY-MM-DD) - only sync events closing before this date
-            volume_min: Minimum volume filter
-            volume_max: Maximum volume filter
-            liquidity_min: Minimum liquidity filter
-            liquidity_max: Maximum liquidity filter
+        Sync events from Polymarket with their nested markets.
+        Fetches and saves in batches to minimize memory usage.
         """
-        all_events = []  # Track all created events
-        events_batch = []  # Current batch of events
-        market_data_batch = {}  # Market data for current batch
+        total_events = [0]  # Use list to allow modification in nested function
+        events_batch = []
+        market_data_batch = {}
+        seen_ids = set()
 
         # Convert date strings to ISO 8601 format for Polymarket API
         end_date_min = None
@@ -573,104 +709,119 @@ class EventSyncService:
                 logger.warning(f"Invalid close_before date format: {close_before}")
 
         try:
-            # Fetch events - if tag_ids provided, fetch for each tag
-            events_data = []
+            # Fetch events page by page
             if tag_ids:
                 for tag_id in tag_ids:
-                    tag_events = self.poly_client.get_all_active_events(
-                        tag_id=tag_id,
-                        end_date_min=end_date_min,
-                        end_date_max=end_date_max,
-                        volume_min=volume_min,
-                        volume_max=volume_max,
-                        liquidity_min=liquidity_min,
-                        liquidity_max=liquidity_max
-                    )
-                    events_data.extend(tag_events)
-                # Deduplicate by event ID
-                seen_ids = set()
-                unique_events = []
-                for event in events_data:
-                    event_id = event.get('id', '')
-                    if event_id and event_id not in seen_ids:
-                        seen_ids.add(event_id)
-                        unique_events.append(event)
-                events_data = unique_events
+                    offset = 0
+                    limit = 100
+
+                    while True:
+                        try:
+                            response = self.poly_client.get_events(
+                                offset=offset,
+                                limit=limit,
+                                active=True,
+                                tag_id=tag_id,
+                                end_date_min=end_date_min,
+                                end_date_max=end_date_max,
+                                volume_min=volume_min,
+                                volume_max=volume_max,
+                                liquidity_min=liquidity_min,
+                                liquidity_max=liquidity_max
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to fetch events at offset {offset}: {e}")
+                            break
+
+                        if isinstance(response, list):
+                            events = response
+                        elif isinstance(response, dict):
+                            events = response.get('data', [])
+                        else:
+                            events = []
+
+                        if not events:
+                            break
+
+                        for event_data in events:
+                            event_id = event_data.get('id', '')
+                            if event_id and event_id not in seen_ids:
+                                seen_ids.add(event_id)
+                                self._process_polymarket_event(event_data, events_batch, market_data_batch)
+
+                                # Flush if batch is full
+                                if len(events_batch) >= BATCH_SIZE:
+                                    self._flush_polymarket_batch(events_batch, market_data_batch, total_events)
+                                    events_batch = []
+                                    market_data_batch = {}
+
+                        if len(events) < limit:
+                            break
+
+                        offset += limit
             else:
-                events_data = self.poly_client.get_all_active_events(
-                    end_date_min=end_date_min,
-                    end_date_max=end_date_max,
-                    volume_min=volume_min,
-                    volume_max=volume_max,
-                    liquidity_min=liquidity_min,
-                    liquidity_max=liquidity_max
-                )
+                # Fetch all events page by page
+                offset = 0
+                limit = 100
 
-            logger.info(f"Processing {len(events_data)} Polymarket events")
-
-            # Process events and batch them
-            for event_data in events_data:
-                event_id = event_data.get('id', '')
-                slug = event_data.get('slug', '')
-                if not event_id and not slug:
-                    continue
-
-                external_id = event_id or slug
-
-                # Build URL
-                url = f"https://polymarket.com/event/{slug}" if slug else ''
-
-                # Parse end date
-                end_date = None
-                end_date_str = event_data.get('endDate')
-                if end_date_str:
+                while True:
                     try:
-                        end_date = datetime.fromisoformat(
-                            end_date_str.replace('Z', '+00:00')
+                        response = self.poly_client.get_events(
+                            offset=offset,
+                            limit=limit,
+                            active=True,
+                            end_date_min=end_date_min,
+                            end_date_max=end_date_max,
+                            volume_min=volume_min,
+                            volume_max=volume_max,
+                            liquidity_min=liquidity_min,
+                            liquidity_max=liquidity_max
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.error(f"Failed to fetch events at offset {offset}: {e}")
+                        break
 
-                # Create Event object (not saved yet)
-                events_batch.append(Event(
-                    exchange=Exchange.POLYMARKET,
-                    external_id=external_id,
-                    title=event_data.get('title', slug),
-                    description=event_data.get('description', ''),
-                    category=event_data.get('category', ''),
-                    url=url,
-                    volume=float(event_data.get('volume', 0) or 0),
-                    volume_24h=float(event_data.get('volume24hr', 0) or 0),
-                    liquidity=float(event_data.get('liquidity', 0) or 0),
-                    open_interest=float(event_data.get('openInterest', 0) or 0),
-                    is_active=event_data.get('active', True),
-                    mutually_exclusive=event_data.get('negRisk', False),
-                    end_date=end_date
-                ))
+                    if isinstance(response, list):
+                        events = response
+                    elif isinstance(response, dict):
+                        events = response.get('data', [])
+                    else:
+                        events = []
 
-                # Store market data for this event
-                market_data_batch[external_id] = {
-                    'markets': event_data.get('markets', []),
-                    'slug': slug
-                }
+                    if not events:
+                        break
 
-                # Flush batch if we've reached the batch size
-                if len(events_batch) >= BATCH_SIZE:
-                    self._flush_polymarket_batch(events_batch, market_data_batch, all_events)
-                    events_batch = []
-                    market_data_batch = {}
+                    for event_data in events:
+                        event_id = event_data.get('id', '')
+                        if event_id and event_id not in seen_ids:
+                            seen_ids.add(event_id)
+                            self._process_polymarket_event(event_data, events_batch, market_data_batch)
+
+                            # Flush if batch is full
+                            if len(events_batch) >= BATCH_SIZE:
+                                self._flush_polymarket_batch(events_batch, market_data_batch, total_events)
+                                events_batch = []
+                                market_data_batch = {}
+
+                    logger.info(f"Fetched page of {len(events)} Polymarket events (offset: {offset})")
+
+                    if len(events) < limit:
+                        break
+
+                    offset += limit
 
             # Flush any remaining events
             if events_batch:
-                self._flush_polymarket_batch(events_batch, market_data_batch, all_events)
+                self._flush_polymarket_batch(events_batch, market_data_batch, total_events)
 
-            logger.info(f"Synced {len(all_events)} Polymarket events total")
+            logger.info(f"Synced {total_events[0]} Polymarket events total")
 
         except Exception as e:
             logger.error(f"Error syncing Polymarket events: {e}")
             raise
 
-        return all_events
+        # Return placeholder list with correct count
+        return [None] * total_events[0]
 
     def sync_all_events(
         self,
