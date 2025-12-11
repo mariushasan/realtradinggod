@@ -98,8 +98,16 @@ class PolymarketClient:
 
         raise last_error
 
-    def get_markets(self, offset: int = 0, limit: int = 100, active: bool = True, tag_id: int = None) -> list:
-        """Get markets from Gamma API"""
+    def get_markets(
+        self,
+        offset: int = 0,
+        limit: int = 100,
+        active: bool = True,
+        tag_id: int = None,
+        end_date_min: str = None,
+        end_date_max: str = None
+    ) -> list:
+        """Get markets from Gamma API with optional date filtering"""
         params = {
             'limit': limit,
             'offset': offset,
@@ -108,6 +116,10 @@ class PolymarketClient:
         }
         if tag_id is not None:
             params['tag_id'] = tag_id
+        if end_date_min is not None:
+            params['end_date_min'] = end_date_min
+        if end_date_max is not None:
+            params['end_date_max'] = end_date_max
         return self._gamma_request('/markets', params)
 
     def get_market(self, condition_id: str) -> dict:
@@ -146,15 +158,27 @@ class PolymarketClient:
         """Get order book for a token"""
         return self._clob_request('GET', '/book', {'token_id': token_id})
 
-    def get_all_active_markets(self, tag_id: int = None) -> list:
-        """Fetch all active markets with offset-based pagination, optionally filtered by tag"""
+    def get_all_active_markets(
+        self,
+        tag_id: int = None,
+        end_date_min: str = None,
+        end_date_max: str = None
+    ) -> list:
+        """Fetch all active markets with offset-based pagination, optionally filtered by tag and date"""
         all_markets = []
         offset = 0
         limit = 100
 
         while True:
             try:
-                response = self.get_markets(offset=offset, limit=limit, active=True, tag_id=tag_id)
+                response = self.get_markets(
+                    offset=offset,
+                    limit=limit,
+                    active=True,
+                    tag_id=tag_id,
+                    end_date_min=end_date_min,
+                    end_date_max=end_date_max
+                )
             except Exception as e:
                 logger.error(f"Failed to fetch markets at offset {offset}: {e}")
                 break

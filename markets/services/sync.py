@@ -112,15 +112,42 @@ class MarketSyncService:
         """Get Polymarket tags from database"""
         return list(Tag.objects.filter(exchange=Exchange.POLYMARKET).order_by('label'))
 
-    def sync_kalshi_markets(self, tag_slugs: Optional[List[str]] = None) -> List[Market]:
+    def sync_kalshi_markets(
+        self,
+        tag_slugs: Optional[List[str]] = None,
+        close_after: Optional[str] = None,
+        close_before: Optional[str] = None
+    ) -> List[Market]:
         """
-        Sync markets from Kalshi, optionally filtered by tag slugs.
+        Sync markets from Kalshi, optionally filtered by tag slugs and close date range.
 
         Kalshi's API structure requires a two-step process:
         1. Get series that match the selected categories (tags belong to categories)
         2. Get markets for those series
+
+        Args:
+            tag_slugs: List of tag slugs to filter by
+            close_after: ISO date string (YYYY-MM-DD) - only sync markets closing after this date
+            close_before: ISO date string (YYYY-MM-DD) - only sync markets closing before this date
         """
         synced = []
+
+        # Convert date strings to Unix timestamps for Kalshi API
+        min_close_ts = None
+        max_close_ts = None
+        if close_after:
+            try:
+                dt = datetime.strptime(close_after, '%Y-%m-%d')
+                min_close_ts = int(dt.timestamp())
+            except ValueError:
+                logger.warning(f"Invalid close_after date format: {close_after}")
+        if close_before:
+            try:
+                # Set to end of day for "before" filter
+                dt = datetime.strptime(close_before, '%Y-%m-%d').replace(hour=23, minute=59, second=59)
+                max_close_ts = int(dt.timestamp())
+            except ValueError:
+                logger.warning(f"Invalid close_before date format: {close_before}")
 
         # Get Tag objects for the selected slugs
         tag_objects = []
@@ -159,7 +186,11 @@ class MarketSyncService:
                 # Step 2: Get markets for each series
                 for series_ticker in series_tickers:
                     try:
-                        series_markets = self.kalshi_client.get_markets_by_series(series_ticker)
+                        series_markets = self.kalshi_client.get_markets_by_series(
+                            series_ticker,
+                            min_close_ts=min_close_ts,
+                            max_close_ts=max_close_ts
+                        )
                         for market in series_markets:
                             ticker = market.get('ticker', '')
                             if ticker and ticker not in seen_tickers:
@@ -169,7 +200,10 @@ class MarketSyncService:
                         logger.warning(f"Failed to fetch markets for series {series_ticker}: {e}")
             else:
                 # No filter - fetch all open markets
-                markets_data = self.kalshi_client.get_all_open_markets()
+                markets_data = self.kalshi_client.get_all_open_markets(
+                    min_close_ts=min_close_ts,
+                    max_close_ts=max_close_ts
+                )
 
             logger.info(f"Processing {len(markets_data)} Kalshi markets")
 
@@ -235,9 +269,39 @@ class MarketSyncService:
 
         return synced
 
-    def sync_polymarket_markets(self, tag_ids: Optional[List[int]] = None) -> List[Market]:
-        """Sync markets from Polymarket, optionally filtered by tag IDs"""
+    def sync_polymarket_markets(
+        self,
+        tag_ids: Optional[List[int]] = None,
+        close_after: Optional[str] = None,
+        close_before: Optional[str] = None
+    ) -> List[Market]:
+        """
+        Sync markets from Polymarket, optionally filtered by tag IDs and close date range.
+
+        Args:
+            tag_ids: List of tag IDs to filter by
+            close_after: ISO date string (YYYY-MM-DD) - only sync markets closing after this date
+            close_before: ISO date string (YYYY-MM-DD) - only sync markets closing before this date
+        """
         synced = []
+
+        # Convert date strings to ISO 8601 format for Polymarket API
+        end_date_min = None
+        end_date_max = None
+        if close_after:
+            try:
+                # Validate and format to ISO 8601
+                dt = datetime.strptime(close_after, '%Y-%m-%d')
+                end_date_min = dt.strftime('%Y-%m-%dT00:00:00.000Z')
+            except ValueError:
+                logger.warning(f"Invalid close_after date format: {close_after}")
+        if close_before:
+            try:
+                # Set to end of day for "before" filter
+                dt = datetime.strptime(close_before, '%Y-%m-%d')
+                end_date_max = dt.strftime('%Y-%m-%dT23:59:59.999Z')
+            except ValueError:
+                logger.warning(f"Invalid close_before date format: {close_before}")
 
         # Get Tag objects for the selected external_ids
         tag_objects = []
@@ -254,14 +318,21 @@ class MarketSyncService:
                 markets_data = []
                 seen_condition_ids = set()
                 for tag_id in tag_ids:
-                    tag_markets = self.poly_client.get_all_active_markets(tag_id=tag_id)
+                    tag_markets = self.poly_client.get_all_active_markets(
+                        tag_id=tag_id,
+                        end_date_min=end_date_min,
+                        end_date_max=end_date_max
+                    )
                     for market in tag_markets:
                         condition_id = market.get('conditionId', market.get('condition_id', ''))
                         if condition_id and condition_id not in seen_condition_ids:
                             markets_data.append(market)
                             seen_condition_ids.add(condition_id)
             else:
-                markets_data = self.poly_client.get_all_active_markets()
+                markets_data = self.poly_client.get_all_active_markets(
+                    end_date_min=end_date_min,
+                    end_date_max=end_date_max
+                )
 
             for market_data in markets_data:
                 condition_id = market_data.get('conditionId', market_data.get('condition_id', ''))
@@ -352,9 +423,11 @@ class MarketSyncService:
     def sync_all(
         self,
         kalshi_tag_slugs: Optional[List[str]] = None,
-        polymarket_tag_ids: Optional[List[int]] = None
+        polymarket_tag_ids: Optional[List[int]] = None,
+        close_after: Optional[str] = None,
+        close_before: Optional[str] = None
     ) -> Dict[str, List[Market]]:
-        """Sync markets from all exchanges in parallel, with optional tag filtering"""
+        """Sync markets from all exchanges in parallel, with optional tag and date filtering"""
         results = {
             'kalshi': [],
             'polymarket': []
@@ -363,8 +436,18 @@ class MarketSyncService:
         # Run both syncs in parallel
         with ThreadPoolExecutor(max_workers=2) as executor:
             futures = {
-                executor.submit(self.sync_kalshi_markets, kalshi_tag_slugs): 'kalshi',
-                executor.submit(self.sync_polymarket_markets, polymarket_tag_ids): 'polymarket'
+                executor.submit(
+                    self.sync_kalshi_markets,
+                    kalshi_tag_slugs,
+                    close_after,
+                    close_before
+                ): 'kalshi',
+                executor.submit(
+                    self.sync_polymarket_markets,
+                    polymarket_tag_ids,
+                    close_after,
+                    close_before
+                ): 'polymarket'
             }
 
             for future in as_completed(futures):

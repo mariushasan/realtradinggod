@@ -176,6 +176,24 @@
 
 <div class="section-header">
     <h2>Actions</h2>
+</div>
+
+<div class="date-filter-section">
+    <h4>Market Close Date Filter</h4>
+    <div class="date-filters">
+        <div class="date-input-group">
+            <label for="closeAfterDate">Closes After:</label>
+            <input type="date" id="closeAfterDate" class="date-input">
+        </div>
+        <div class="date-input-group">
+            <label for="closeBeforeDate">Closes Before:</label>
+            <input type="date" id="closeBeforeDate" class="date-input">
+        </div>
+        <button class="btn-small" onclick="clearDateFilters()">Clear</button>
+    </div>
+</div>
+
+<div class="action-buttons">
     <div>
         <button class="btn primary" onclick="syncMarkets()" id="syncBtn">
             Sync Markets
@@ -543,12 +561,20 @@
         loading.style.display = 'inline';
 
         try {
+            const { closeAfter, closeBefore } = getDateFilters();
+
             const body = {};
             if (kalshiSlugs.length > 0) {
                 body.kalshi_tags = kalshiSlugs;
             }
             if (polymarketIds.length > 0) {
                 body.polymarket_tags = polymarketIds;
+            }
+            if (closeAfter) {
+                body.close_after = closeAfter;
+            }
+            if (closeBefore) {
+                body.close_before = closeBefore;
             }
 
             const response = await fetch('{% url "markets:sync_markets" %}', {
@@ -591,6 +617,17 @@
         return { kalshiTags, polymarketTags };
     }
 
+    function getDateFilters() {
+        const closeAfter = document.getElementById('closeAfterDate').value;
+        const closeBefore = document.getElementById('closeBeforeDate').value;
+        return { closeAfter, closeBefore };
+    }
+
+    function clearDateFilters() {
+        document.getElementById('closeAfterDate').value = '';
+        document.getElementById('closeBeforeDate').value = '';
+    }
+
     function validateTagSelection() {
         const { kalshiTags, polymarketTags } = getSelectedTags();
         if (kalshiTags.length === 0 && polymarketTags.length === 0) {
@@ -611,6 +648,7 @@
 
         try {
             const { kalshiTags, polymarketTags } = getSelectedTags();
+            const { closeAfter, closeBefore } = getDateFilters();
 
             const body = {};
             if (kalshiTags.length > 0) {
@@ -618,6 +656,12 @@
             }
             if (polymarketTags.length > 0) {
                 body.polymarket_tags = polymarketTags;
+            }
+            if (closeAfter) {
+                body.close_after = closeAfter;
+            }
+            if (closeBefore) {
+                body.close_before = closeBefore;
             }
 
             const response = await fetch('{% url "markets:sync_markets" %}', {

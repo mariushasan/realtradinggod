@@ -166,13 +166,25 @@ class KalshiClient:
         params = {'with_nested_markets': str(with_nested_markets).lower()}
         return self._request('GET', f'/events/{event_ticker}', params)
 
-    def get_markets(self, status: str = 'open', limit: int = 200, cursor: str = None, event_ticker: str = None) -> dict:
-        """Get markets from Kalshi"""
+    def get_markets(
+        self,
+        status: str = 'open',
+        limit: int = 200,
+        cursor: str = None,
+        event_ticker: str = None,
+        series_ticker: str = None,
+        min_close_ts: int = None,
+        max_close_ts: int = None
+    ) -> dict:
+        """Get markets from Kalshi with optional date filtering"""
         params = {
             'status': status,
             'limit': limit,
             'cursor': cursor,
-            'event_ticker': event_ticker
+            'event_ticker': event_ticker,
+            'series_ticker': series_ticker,
+            'min_close_ts': min_close_ts,
+            'max_close_ts': max_close_ts
         }
         return self._request('GET', '/markets', params)
 
@@ -180,13 +192,22 @@ class KalshiClient:
         """Get single market by ticker"""
         return self._request('GET', f'/markets/{ticker}')
 
-    def get_all_open_markets(self) -> list:
-        """Fetch all open markets with pagination"""
+    def get_all_open_markets(
+        self,
+        min_close_ts: int = None,
+        max_close_ts: int = None
+    ) -> list:
+        """Fetch all open markets with pagination and optional date filtering"""
         all_markets = []
         cursor = None
 
         while True:
-            response = self.get_markets(status='open', cursor=cursor)
+            response = self.get_markets(
+                status='open',
+                cursor=cursor,
+                min_close_ts=min_close_ts,
+                max_close_ts=max_close_ts
+            )
             markets = response.get('markets', [])
             all_markets.extend(markets)
 
@@ -249,19 +270,25 @@ class KalshiClient:
 
         return all_series
 
-    def get_markets_by_series(self, series_ticker: str, status: str = 'open') -> list:
-        """Get all markets for a specific series"""
+    def get_markets_by_series(
+        self,
+        series_ticker: str,
+        status: str = 'open',
+        min_close_ts: int = None,
+        max_close_ts: int = None
+    ) -> list:
+        """Get all markets for a specific series with optional date filtering"""
         all_markets = []
         cursor = None
 
         while True:
-            params = {
-                'series_ticker': series_ticker,
-                'status': status,
-                'limit': 200,
-                'cursor': cursor
-            }
-            response = self._request('GET', '/markets', params)
+            response = self.get_markets(
+                status=status,
+                cursor=cursor,
+                series_ticker=series_ticker,
+                min_close_ts=min_close_ts,
+                max_close_ts=max_close_ts
+            )
             markets = response.get('markets', [])
             all_markets.extend(markets)
 

@@ -203,14 +203,16 @@ class MatchesListView(View):
 
 @csrf_exempt
 def sync_markets(request):
-    """Sync markets from exchanges (fetch and save only), with optional tag filtering"""
+    """Sync markets from exchanges (fetch and save only), with optional tag and date filtering"""
     if request.method == 'POST':
         sync_service = MarketSyncService()
 
         try:
-            # Parse request body for tag filters
+            # Parse request body for tag and date filters
             kalshi_tag_slugs = None
             polymarket_tag_ids = None
+            close_after = None
+            close_before = None
 
             if request.body:
                 try:
@@ -224,12 +226,18 @@ def sync_markets(request):
                     poly_tags = data.get('polymarket_tags', [])
                     if poly_tags:
                         polymarket_tag_ids = [int(t) for t in poly_tags]
+
+                    # Date filters (ISO format strings: YYYY-MM-DD)
+                    close_after = data.get('close_after')
+                    close_before = data.get('close_before')
                 except (json.JSONDecodeError, ValueError):
                     pass
 
             results = sync_service.sync_all(
                 kalshi_tag_slugs=kalshi_tag_slugs,
-                polymarket_tag_ids=polymarket_tag_ids
+                polymarket_tag_ids=polymarket_tag_ids,
+                close_after=close_after,
+                close_before=close_before
             )
 
             return JsonResponse({
