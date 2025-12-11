@@ -130,26 +130,6 @@ class KalshiClient:
     def get_market(self, ticker: str) -> dict:
         return self._request('GET', f'/markets/{ticker}')
 
-    def search_markets(self, query: str) -> list:
-        all_markets = []
-        cursor = None
-
-        while True:
-            response = self.get_markets(status='open', cursor=cursor)
-            markets = response.get('markets', [])
-
-            for market in markets:
-                title = market.get('title', '').lower()
-                ticker = market.get('ticker', '').lower()
-                if query.lower() in title or query.lower() in ticker:
-                    all_markets.append(market)
-
-            cursor = response.get('cursor')
-            if not cursor or not markets:
-                break
-
-        return all_markets
-
     def get_orderbook(self, ticker: str, depth: int = 10) -> dict:
         params = {'depth': depth} if depth > 0 else None
         return self._request('GET', f'/markets/{ticker}/orderbook', params)
@@ -180,60 +160,23 @@ class KalshiClient:
         return self._request('GET', '/portfolio/orders', params)
 
 
+MARKET_TICKER = 'KXRAINNYC-25DEC11-T0'
+
+
 def find_nyc_weather_market(client: KalshiClient) -> dict:
     print("\n" + "="*60)
-    print("STEP 1: Finding NYC Weather Market")
+    print("STEP 1: Getting Market Data")
     print("="*60)
 
-    today = datetime.date.today()
-    print(f"Looking for NYC weather markets for {today}...")
+    print(f"Fetching market: {MARKET_TICKER}")
 
-    search_terms = ['KXRAINNYC', 'HIGHNY', 'KXNYC', 'NYC', 'New York']
-    found_markets = []
-
-    for term in search_terms:
-        print(f"  Searching for '{term}'...")
-        try:
-            response = client.get_markets(status='open', series_ticker=term)
-            markets = response.get('markets', [])
-            if markets:
-                print(f"    Found {len(markets)} markets with series_ticker={term}")
-                found_markets.extend(markets)
-        except Exception as e:
-            print(f"    Series search failed: {e}")
-
-    if not found_markets:
-        print("  Falling back to full market search...")
-        markets = client.search_markets('NYC')
-        markets.extend(client.search_markets('New York'))
-        found_markets = [m for m in markets if 'weather' in m.get('title', '').lower()
-                        or 'temp' in m.get('title', '').lower()
-                        or 'high' in m.get('title', '').lower()]
-
-    # filter for today
-    today_markets = []
-    for market in found_markets:
-        close_time_str = market.get('close_time', '')
-        if close_time_str:
-            try:
-                close_time = datetime.datetime.fromisoformat(close_time_str.replace('Z', '+00:00'))
-                if close_time.date() == today:
-                    today_markets.append(market)
-            except:
-                pass
-
-    if today_markets:
-        print(f"\nFound {len(today_markets)} NYC weather markets for today:")
-        for m in today_markets[:5]:
-            print(f"  - {m.get('ticker')}: {m.get('title')}")
-        return today_markets[0]
-    elif found_markets:
-        print(f"\nNo markets for today, but found {len(found_markets)} related markets:")
-        for m in found_markets[:5]:
-            print(f"  - {m.get('ticker')}: {m.get('title')}")
-        return found_markets[0]
-    else:
-        print("\n✗ No NYC weather markets found")
+    try:
+        response = client.get_market(MARKET_TICKER)
+        market = response.get('market', {})
+        print(f"  ✓ Found: {market.get('title')}")
+        return market
+    except Exception as e:
+        print(f"  ✗ Failed to get market: {e}")
         return None
 
 
@@ -361,20 +304,11 @@ def main():
     market = find_nyc_weather_market(client)
 
     if not market:
-        print("\nCould not find a suitable NYC weather market.")
-        print("Attempting to use a sample market for demonstration...")
-        try:
-            response = client.get_markets(status='open', limit=1)
-            markets = response.get('markets', [])
-            if markets:
-                market = markets[0]
-                print(f"Using fallback market: {market.get('ticker')} - {market.get('title')}")
-        except Exception as e:
-            print(f"Failed to get any market: {e}")
-            sys.exit(1)
+        print("\nFailed to get market data.")
+        sys.exit(1)
 
     ticker = market.get('ticker')
-    print(f"\nSelected market: {ticker}")
+    print(f"\nMarket: {ticker}")
     print(f"Title: {market.get('title')}")
     print(f"Status: {market.get('status')}")
 
