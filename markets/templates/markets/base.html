@@ -687,6 +687,62 @@
             background: #1e4b7f;
             border-color: #1e4b7f;
         }
+
+        /* Add tag form styles */
+        .add-tag-form {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #333;
+        }
+
+        .tag-input {
+            background: #222;
+            color: #fff;
+            border: 1px solid #333;
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .tag-input:focus {
+            outline: none;
+            border-color: #2563eb;
+        }
+
+        .tag-input.category-input {
+            flex: 0.6;
+        }
+
+        .tag-input::placeholder {
+            color: #666;
+        }
+
+        /* Tag delete button */
+        .tag-delete-btn {
+            display: none;
+            background: transparent;
+            border: none;
+            color: #f87171;
+            font-size: 1rem;
+            cursor: pointer;
+            padding: 0 4px;
+            margin-left: 4px;
+            line-height: 1;
+            opacity: 0.6;
+            transition: opacity 0.2s;
+        }
+
+        .tag-checkbox:hover .tag-delete-btn {
+            display: inline-block;
+        }
+
+        .tag-delete-btn:hover {
+            opacity: 1;
+        }
     </style>
 </head>
 <body>

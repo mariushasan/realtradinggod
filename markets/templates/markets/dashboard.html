@@ -40,6 +40,11 @@
                 <span>Select All</span>
             </label>
         </div>
+        <div class="add-tag-form">
+            <input type="text" id="kalshiTagInput" placeholder="New tag label..." class="tag-input">
+            <input type="text" id="kalshiCategoryInput" placeholder="Category (optional)" class="tag-input category-input">
+            <button class="btn-small" onclick="addTag('kalshi')">+ Add</button>
+        </div>
         <div class="tag-select-container" id="kalshiTagsContainer">
             <div class="tag-checkboxes" id="kalshiTags">
                 {% if kalshi_tags_by_category %}
@@ -51,6 +56,7 @@
                             <label class="tag-checkbox">
                                 <input type="checkbox" name="kalshi_tag" value="{{ tag.slug }}" data-label="{{ tag.label }}" data-tag-id="{{ tag.id }}">
                                 <span class="tag-label">{{ tag.label }}</span>
+                                <button class="tag-delete-btn" onclick="event.preventDefault(); deleteTag({{ tag.id }}, '{{ tag.label|escapejs }}')" title="Delete tag">&times;</button>
                             </label>
                             {% endfor %}
                         </div>
@@ -70,6 +76,10 @@
                 <span>Select All</span>
             </label>
         </div>
+        <div class="add-tag-form">
+            <input type="text" id="polymarketTagInput" placeholder="New tag label..." class="tag-input">
+            <button class="btn-small" onclick="addTag('polymarket')">+ Add</button>
+        </div>
         <div class="tag-select-container" id="polymarketTagsContainer">
             <div class="tag-checkboxes" id="polymarketTags">
                 {% if polymarket_tags %}
@@ -78,6 +88,7 @@
                     <label class="tag-checkbox">
                         <input type="checkbox" name="polymarket_tag" value="{{ tag.external_id }}" data-label="{{ tag.label }}" data-tag-id="{{ tag.id }}">
                         <span class="tag-label">{{ tag.label }}</span>
+                        <button class="tag-delete-btn" onclick="event.preventDefault(); deleteTag({{ tag.id }}, '{{ tag.label|escapejs }}')" title="Delete tag">&times;</button>
                     </label>
                     {% endfor %}
                 </div>
@@ -177,6 +188,10 @@
         <button class="btn secondary" onclick="syncFromMatchedTags()" id="syncMatchedBtn">
             Sync from Matched Tags
             <span class="loading" id="syncMatchedLoading">...</span>
+        </button>
+        <button class="btn secondary" onclick="findOpportunitiesFromMatchedTags()" id="findOppsMatchedBtn">
+            Find Opportunities from Matched Tags
+            <span class="loading" id="findOppsMatchedLoading">...</span>
         </button>
     </div>
 </div>
@@ -663,6 +678,122 @@
 
             if (data.success) {
                 showToast(`Found ${data.matches_found} matches, ${data.opportunities_found} opportunities`);
+                setTimeout(() => location.reload(), 1500);
+            } else {
+                showToast('Error: ' + data.error, 'error');
+            }
+        } catch (e) {
+            showToast('Network error: ' + e.message, 'error');
+        } finally {
+            btn.disabled = false;
+            loading.style.display = 'none';
+        }
+    }
+
+    async function addTag(exchange) {
+        let label, category = '';
+
+        if (exchange === 'kalshi') {
+            label = document.getElementById('kalshiTagInput').value.trim();
+            category = document.getElementById('kalshiCategoryInput').value.trim();
+        } else {
+            label = document.getElementById('polymarketTagInput').value.trim();
+        }
+
+        if (!label) {
+            showToast('Please enter a tag label.', 'error');
+            return;
+        }
+
+        try {
+            const response = await fetch('{% url "markets:create_tag" %}', {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': getCookie('csrftoken'),
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    exchange: exchange,
+                    label: label,
+                    category: category
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                showToast(`Tag "${label}" created for ${exchange}`);
+                setTimeout(() => location.reload(), 500);
+            } else {
+                showToast('Error: ' + data.error, 'error');
+            }
+        } catch (e) {
+            showToast('Network error: ' + e.message, 'error');
+        }
+    }
+
+    async function deleteTag(tagId, tagLabel) {
+        if (!confirm(`Are you sure you want to delete the tag "${tagLabel}"? This will also remove any tag matches using this tag.`)) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/tags/${tagId}/delete/`, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': getCookie('csrftoken'),
+                }
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                showToast(data.message);
+                setTimeout(() => location.reload(), 500);
+            } else {
+                showToast('Error: ' + data.error, 'error');
+            }
+        } catch (e) {
+            showToast('Network error: ' + e.message, 'error');
+        }
+    }
+
+    async function findOpportunitiesFromMatchedTags() {
+        const { kalshiSlugs, polymarketIds } = getSelectedMatchedTags();
+
+        if (kalshiSlugs.length === 0 && polymarketIds.length === 0) {
+            showToast('Please select at least one matched tag pair to find opportunities.', 'error');
+            return;
+        }
+
+        const btn = document.getElementById('findOppsMatchedBtn');
+        const loading = document.getElementById('findOppsMatchedLoading');
+
+        btn.disabled = true;
+        loading.style.display = 'inline';
+
+        try {
+            const body = {};
+            if (kalshiSlugs.length > 0) {
+                body.kalshi_tags = kalshiSlugs;
+            }
+            if (polymarketIds.length > 0) {
+                body.polymarket_tags = polymarketIds;
+            }
+
+            const response = await fetch('{% url "markets:refresh_arbitrage" %}', {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': getCookie('csrftoken'),
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(body)
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                showToast(`Found ${data.matches_found} matches, ${data.opportunities_found} opportunities from matched tags`);
                 setTimeout(() => location.reload(), 1500);
             } else {
                 showToast('Error: ' + data.error, 'error');

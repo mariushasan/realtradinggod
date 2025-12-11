@@ -475,6 +475,107 @@ def delete_tag_match(request, match_id):
 
 
 @csrf_exempt
+def create_tag(request):
+    """Create a manual tag for either exchange"""
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            exchange = data.get('exchange')
+            label = data.get('label', '').strip()
+            category = data.get('category', '').strip()
+            external_id = data.get('external_id', '').strip()
+
+            if not exchange or exchange not in [Exchange.KALSHI, Exchange.POLYMARKET]:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Valid exchange (kalshi or polymarket) is required'
+                }, status=400)
+
+            if not label:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Tag label is required'
+                }, status=400)
+
+            # Generate slug from label
+            slug = label.lower().replace(' ', '-')
+
+            # For Polymarket, generate a custom external_id if not provided
+            if exchange == Exchange.POLYMARKET and not external_id:
+                external_id = f"custom_{slug}"
+
+            # Check if tag already exists
+            existing = Tag.objects.filter(
+                exchange=exchange,
+                label=label,
+                category=category
+            ).first()
+
+            if existing:
+                return JsonResponse({
+                    'success': False,
+                    'error': f'Tag "{label}" already exists for {exchange}'
+                }, status=400)
+
+            tag = Tag.objects.create(
+                exchange=exchange,
+                label=label,
+                slug=slug,
+                category=category,
+                external_id=external_id
+            )
+
+            return JsonResponse({
+                'success': True,
+                'tag': {
+                    'id': tag.id,
+                    'exchange': tag.exchange,
+                    'label': tag.label,
+                    'slug': tag.slug,
+                    'category': tag.category,
+                    'external_id': tag.external_id,
+                }
+            })
+
+        except json.JSONDecodeError:
+            return JsonResponse({
+                'success': False,
+                'error': 'Invalid JSON in request body'
+            }, status=400)
+        except Exception as e:
+            return JsonResponse({
+                'success': False,
+                'error': str(e)
+            }, status=500)
+
+    return JsonResponse({'error': 'POST required'}, status=405)
+
+
+@csrf_exempt
+def delete_tag(request, tag_id):
+    """Delete a tag"""
+    if request.method == 'DELETE' or request.method == 'POST':
+        try:
+            tag = get_object_or_404(Tag, id=tag_id)
+            label = tag.label
+            exchange = tag.exchange
+            tag.delete()
+
+            return JsonResponse({
+                'success': True,
+                'message': f'Tag "{label}" deleted from {exchange}'
+            })
+
+        except Exception as e:
+            return JsonResponse({
+                'success': False,
+                'error': str(e)
+            }, status=500)
+
+    return JsonResponse({'error': 'DELETE or POST required'}, status=405)
+
+
+@csrf_exempt
 def verify_match(request, match_id):
     """Verify/unverify a market match"""
     if request.method == 'POST':
