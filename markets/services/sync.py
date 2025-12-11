@@ -45,7 +45,7 @@ class MarketSyncService:
                         label=label.strip(),
                         category=category,
                         defaults={
-                            'slug': label.strip().lower().replace(' ', '-'),
+                            'slug': label.strip(),
                             'external_id': ''  # Kalshi tags don't have IDs
                         }
                     )
@@ -149,61 +149,15 @@ class MarketSyncService:
             except ValueError:
                 logger.warning(f"Invalid close_before date format: {close_before}")
 
-        # Get Tag objects for the selected slugs
-        tag_objects = []
-        categories = set()
-        if tag_slugs:
-            tag_objects = list(Tag.objects.filter(
-                exchange=Exchange.KALSHI,
-                slug__in=tag_slugs
-            ))
-            # Get unique categories from the selected tags
-            for tag in tag_objects:
-                if tag.category:
-                    categories.add(tag.category)
-
         try:
             markets_data = []
             seen_tickers = set()
 
-            if categories:
-                # Step 1: Get series for each category
-                logger.info(f"Fetching series for Kalshi categories: {categories}")
-                series_tickers = set()
-                for category in categories:
-                    try:
-                        response = self.kalshi_client.get_series(category=category)
-                        series_list = response.get('series', [])
-                        for series in series_list:
-                            ticker = series.get('ticker', '')
-                            if ticker:
-                                series_tickers.add(ticker)
-                    except Exception as e:
-                        logger.warning(f"Failed to fetch series for category {category}: {e}")
-
-                logger.info(f"Found {len(series_tickers)} series tickers for selected categories")
-
-                # Step 2: Get markets for each series
-                for series_ticker in series_tickers:
-                    try:
-                        series_markets = self.kalshi_client.get_markets_by_series(
-                            series_ticker,
-                            min_close_ts=min_close_ts,
-                            max_close_ts=max_close_ts
-                        )
-                        for market in series_markets:
-                            ticker = market.get('ticker', '')
-                            if ticker and ticker not in seen_tickers:
-                                markets_data.append(market)
-                                seen_tickers.add(ticker)
-                    except Exception as e:
-                        logger.warning(f"Failed to fetch markets for series {series_ticker}: {e}")
-            else:
-                # No filter - fetch all open markets
-                markets_data = self.kalshi_client.get_all_open_markets(
-                    min_close_ts=min_close_ts,
-                    max_close_ts=max_close_ts
-                )
+            # No filter - fetch all open markets
+            markets_data = self.kalshi_client.get_all_open_markets(
+                min_close_ts=min_close_ts,
+                max_close_ts=max_close_ts
+            )
 
             logger.info(f"Processing {len(markets_data)} Kalshi markets")
 
@@ -257,10 +211,6 @@ class MarketSyncService:
                     }
                 )
 
-                # Associate market with the tags used for syncing
-                if tag_objects:
-                    market.tags.add(*tag_objects)
-
                 synced.append(market)
 
         except Exception as e:
@@ -303,36 +253,11 @@ class MarketSyncService:
             except ValueError:
                 logger.warning(f"Invalid close_before date format: {close_before}")
 
-        # Get Tag objects for the selected external_ids
-        tag_objects = []
-        if tag_ids:
-            tag_id_strs = [str(t) for t in tag_ids]
-            tag_objects = list(Tag.objects.filter(
-                exchange=Exchange.POLYMARKET,
-                external_id__in=tag_id_strs
-            ))
-
         try:
-            # If tag_ids provided, fetch markets for each tag
-            if tag_ids:
-                markets_data = []
-                seen_condition_ids = set()
-                for tag_id in tag_ids:
-                    tag_markets = self.poly_client.get_all_active_markets(
-                        tag_id=tag_id,
-                        end_date_min=end_date_min,
-                        end_date_max=end_date_max
-                    )
-                    for market in tag_markets:
-                        condition_id = market.get('conditionId', market.get('condition_id', ''))
-                        if condition_id and condition_id not in seen_condition_ids:
-                            markets_data.append(market)
-                            seen_condition_ids.add(condition_id)
-            else:
-                markets_data = self.poly_client.get_all_active_markets(
-                    end_date_min=end_date_min,
-                    end_date_max=end_date_max
-                )
+            markets_data = self.poly_client.get_all_active_markets(
+                end_date_min=end_date_min,
+                end_date_max=end_date_max
+            )
 
             for market_data in markets_data:
                 condition_id = market_data.get('conditionId', market_data.get('condition_id', ''))
@@ -407,10 +332,6 @@ class MarketSyncService:
                         'close_time': close_time
                     }
                 )
-
-                # Associate market with the tags used for syncing
-                if tag_objects:
-                    market.tags.add(*tag_objects)
 
                 synced.append(market)
 

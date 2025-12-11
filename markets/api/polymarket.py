@@ -120,6 +120,9 @@ class PolymarketClient:
             params['end_date_min'] = end_date_min
         if end_date_max is not None:
             params['end_date_max'] = end_date_max
+
+        print(params)
+        
         return self._gamma_request('/markets', params)
 
     def get_market(self, condition_id: str) -> dict:

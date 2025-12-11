@@ -186,6 +186,7 @@ class KalshiClient:
             'min_close_ts': min_close_ts,
             'max_close_ts': max_close_ts
         }
+        print(f"params: {params}")
         return self._request('GET', '/markets', params)
 
     def get_market(self, ticker: str) -> dict:
@@ -249,26 +250,8 @@ class KalshiClient:
             params['category'] = category
         if tags:
             params['tags'] = tags
+        print(params)
         return self._request('GET', '/series', params if params else None)
-
-    def get_all_series_for_categories(self, categories: list) -> list:
-        """Get all series for a list of categories"""
-        all_series = []
-        seen_tickers = set()
-
-        for category in categories:
-            try:
-                response = self.get_series(category=category)
-                series_list = response.get('series', [])
-                for series in series_list:
-                    ticker = series.get('ticker', '')
-                    if ticker and ticker not in seen_tickers:
-                        all_series.append(series)
-                        seen_tickers.add(ticker)
-            except Exception as e:
-                logger.warning(f"Failed to fetch series for category {category}: {e}")
-
-        return all_series
 
     def get_markets_by_series(
         self,

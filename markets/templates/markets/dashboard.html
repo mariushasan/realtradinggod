@@ -638,8 +638,6 @@
     }
 
     async function syncMarkets() {
-        if (!validateTagSelection()) return;
-
         const btn = document.getElementById('syncBtn');
         const loading = document.getElementById('syncLoading');
 
@@ -690,8 +688,6 @@
     }
 
     async function refreshOpportunities() {
-        if (!validateTagSelection()) return;
-
         const btn = document.getElementById('refreshBtn');
         const loading = document.getElementById('refreshLoading');
 
