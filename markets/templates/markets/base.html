@@ -548,6 +548,145 @@
                 grid-template-columns: 1fr;
             }
         }
+
+        /* Manual match section */
+        .manual-match-section {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 30px;
+            padding: 15px;
+            background: #151515;
+            border: 1px solid #222;
+            border-radius: 8px;
+        }
+
+        .manual-match-section .help-text {
+            color: #666;
+            font-size: 0.85rem;
+        }
+
+        /* Matched tags section */
+        .matched-tags-section {
+            margin-bottom: 30px;
+        }
+
+        .matched-tags-container {
+            background: #151515;
+            border: 1px solid #222;
+            border-radius: 8px;
+            overflow: hidden;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .matched-tags-table {
+            margin-bottom: 0;
+        }
+
+        .matched-tags-table th {
+            position: sticky;
+            top: 0;
+            background: #1a1a1a;
+            z-index: 1;
+        }
+
+        .tag-match-row.manual-match {
+            background: rgba(37, 99, 235, 0.1);
+        }
+
+        .tag-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+
+        .tag-badge.kalshi {
+            background: #1e3a5f;
+            color: #60a5fa;
+        }
+
+        .tag-badge.polymarket {
+            background: #1e3a1e;
+            color: #4ade80;
+        }
+
+        .score-cell {
+            text-align: center;
+        }
+
+        .score-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .score-badge.high {
+            background: #166534;
+            color: #4ade80;
+        }
+
+        .score-badge.medium {
+            background: #854d0e;
+            color: #fbbf24;
+        }
+
+        .score-badge.low {
+            background: #7f1d1d;
+            color: #fca5a5;
+        }
+
+        .reason-cell {
+            font-size: 0.8rem;
+            color: #888;
+            max-width: 200px;
+        }
+
+        .badge.manual {
+            background: #4c1d95;
+            color: #c4b5fd;
+            margin-right: 8px;
+        }
+
+        .btn-small {
+            padding: 4px 8px;
+            font-size: 0.75rem;
+            background: #222;
+            color: #888;
+            border: 1px solid #333;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-small:hover {
+            background: #333;
+            color: #fff;
+        }
+
+        .btn-small.danger {
+            color: #f87171;
+        }
+
+        .btn-small.danger:hover {
+            background: #7f1d1d;
+            border-color: #7f1d1d;
+            color: #fff;
+        }
+
+        .btn.secondary {
+            background: #1e3a5f;
+            border-color: #1e3a5f;
+        }
+
+        .btn.secondary:hover {
+            background: #1e4b7f;
+            border-color: #1e4b7f;
+        }
     </style>
 </head>
 <body>

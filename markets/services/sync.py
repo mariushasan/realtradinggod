@@ -6,8 +6,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from django.utils import timezone
 
-from markets.models import Market, Exchange, Tag
+from markets.models import Market, Exchange, Tag, TagMatch
 from markets.api import KalshiClient, PolymarketClient
+from markets.services.matcher import TagMatcher
 
 logger = logging.getLogger(__name__)
 
@@ -94,12 +95,25 @@ class MarketSyncService:
 
         return synced
 
-    def sync_all_tags(self) -> Dict[str, List[Tag]]:
-        """Sync tags from both exchanges"""
-        return {
+    def sync_all_tags(self, auto_match: bool = True) -> Dict:
+        """Sync tags from both exchanges and optionally find tag matches"""
+        result = {
             'kalshi': self.sync_kalshi_tags(),
-            'polymarket': self.sync_polymarket_tags()
+            'polymarket': self.sync_polymarket_tags(),
+            'tag_matches': []
         }
+
+        # Auto-match tags after syncing
+        if auto_match:
+            try:
+                tag_matcher = TagMatcher()
+                tag_matches = tag_matcher.auto_match_all_tags()
+                result['tag_matches'] = tag_matches
+                logger.info(f"Created/updated {len(tag_matches)} tag matches")
+            except Exception as e:
+                logger.error(f"Error auto-matching tags: {e}")
+
+        return result
 
     def get_kalshi_tags_from_db(self) -> List[Tag]:
         """Get Kalshi tags from database"""

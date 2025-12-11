@@ -32,6 +32,39 @@ class Tag(models.Model):
         return f"[{self.exchange}] {self.label}"
 
 
+class TagMatch(models.Model):
+    """Match between tags from different exchanges (cross-exchange tag matching)"""
+    kalshi_tag = models.ForeignKey(
+        Tag,
+        on_delete=models.CASCADE,
+        related_name='kalshi_tag_matches',
+        limit_choices_to={'exchange': Exchange.KALSHI}
+    )
+    polymarket_tag = models.ForeignKey(
+        Tag,
+        on_delete=models.CASCADE,
+        related_name='polymarket_tag_matches',
+        limit_choices_to={'exchange': Exchange.POLYMARKET}
+    )
+
+    # NLP matching info
+    similarity_score = models.FloatField(default=0.0)
+    match_reason = models.TextField(blank=True, help_text="Why these tags were matched")
+
+    # Manual vs auto match
+    is_manual = models.BooleanField(default=False, help_text="True if manually created by user")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ['kalshi_tag', 'polymarket_tag']
+        ordering = ['-similarity_score', '-updated_at']
+
+    def __str__(self):
+        return f"TagMatch: {self.kalshi_tag.label} <-> {self.polymarket_tag.label}"
+
+
 class Market(models.Model):
     """Single market from either Kalshi or Polymarket"""
     exchange = models.CharField(max_length=20, choices=Exchange.choices)

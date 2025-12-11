@@ -8,8 +8,8 @@ from django.views.decorators.csrf import csrf_exempt
 from django.utils import timezone
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 
-from .models import Market, MarketMatch, ArbitrageOpportunity, Exchange, Tag
-from .services import MarketMatcher, ArbitrageDetector, MarketSyncService
+from .models import Market, MarketMatch, ArbitrageOpportunity, Exchange, Tag, TagMatch
+from .services import MarketMatcher, TagMatcher, ArbitrageDetector, MarketSyncService
 
 
 class DashboardView(View):
@@ -71,6 +71,33 @@ class DashboardView(View):
             for tag in polymarket_tags
         ]
 
+        # Get tag matches for the matched tags section
+        tag_matches = TagMatch.objects.select_related(
+            'kalshi_tag', 'polymarket_tag'
+        ).order_by('-similarity_score')
+
+        tag_matches_list = [
+            {
+                'id': tm.id,
+                'kalshi_tag': {
+                    'id': tm.kalshi_tag.id,
+                    'label': tm.kalshi_tag.label,
+                    'slug': tm.kalshi_tag.slug,
+                    'category': tm.kalshi_tag.category,
+                },
+                'polymarket_tag': {
+                    'id': tm.polymarket_tag.id,
+                    'external_id': tm.polymarket_tag.external_id,
+                    'label': tm.polymarket_tag.label,
+                    'slug': tm.polymarket_tag.slug,
+                },
+                'similarity_score': tm.similarity_score,
+                'match_reason': tm.match_reason,
+                'is_manual': tm.is_manual,
+            }
+            for tm in tag_matches
+        ]
+
         context = {
             'opportunities': opportunities_page,
             'total_opportunities': paginator.count,
@@ -80,6 +107,8 @@ class DashboardView(View):
             'current_sort': sort,
             'kalshi_tags_by_category': kalshi_tags_by_category,
             'polymarket_tags': polymarket_tags_list,
+            'tag_matches': tag_matches_list,
+            'tag_match_count': len(tag_matches_list),
         }
 
         return render(request, 'markets/dashboard.html', context)
@@ -264,17 +293,18 @@ def get_tags(request):
 
 @csrf_exempt
 def refresh_tags(request):
-    """Refresh tags from exchange APIs and save to database"""
+    """Refresh tags from exchange APIs, save to database, and find tag matches"""
     if request.method == 'POST':
         sync_service = MarketSyncService()
 
         try:
-            results = sync_service.sync_all_tags()
+            results = sync_service.sync_all_tags(auto_match=True)
 
             return JsonResponse({
                 'success': True,
                 'kalshi_synced': len(results['kalshi']),
                 'polymarket_synced': len(results['polymarket']),
+                'tag_matches_found': len(results.get('tag_matches', [])),
             })
 
         except Exception as e:
@@ -284,6 +314,164 @@ def refresh_tags(request):
             }, status=500)
 
     return JsonResponse({'error': 'POST required'}, status=405)
+
+
+@csrf_exempt
+def get_tag_matches(request):
+    """Get all tag matches from database"""
+    if request.method == 'GET':
+        try:
+            tag_matches = TagMatch.objects.select_related(
+                'kalshi_tag', 'polymarket_tag'
+            ).order_by('-similarity_score')
+
+            matches_list = []
+            for tm in tag_matches:
+                matches_list.append({
+                    'id': tm.id,
+                    'kalshi_tag': {
+                        'id': tm.kalshi_tag.id,
+                        'label': tm.kalshi_tag.label,
+                        'slug': tm.kalshi_tag.slug,
+                        'category': tm.kalshi_tag.category,
+                    },
+                    'polymarket_tag': {
+                        'id': tm.polymarket_tag.id,
+                        'external_id': tm.polymarket_tag.external_id,
+                        'label': tm.polymarket_tag.label,
+                        'slug': tm.polymarket_tag.slug,
+                    },
+                    'similarity_score': tm.similarity_score,
+                    'match_reason': tm.match_reason,
+                    'is_manual': tm.is_manual,
+                })
+
+            return JsonResponse({
+                'success': True,
+                'tag_matches': matches_list
+            })
+
+        except Exception as e:
+            return JsonResponse({
+                'success': False,
+                'error': str(e)
+            }, status=500)
+
+    return JsonResponse({'error': 'GET required'}, status=405)
+
+
+@csrf_exempt
+def create_tag_match(request):
+    """Create a manual tag match between a Kalshi tag and a Polymarket tag"""
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            kalshi_tag_id = data.get('kalshi_tag_id')
+            polymarket_tag_id = data.get('polymarket_tag_id')
+
+            if not kalshi_tag_id or not polymarket_tag_id:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Both kalshi_tag_id and polymarket_tag_id are required'
+                }, status=400)
+
+            # Get the tags
+            try:
+                kalshi_tag = Tag.objects.get(id=kalshi_tag_id, exchange=Exchange.KALSHI)
+            except Tag.DoesNotExist:
+                return JsonResponse({
+                    'success': False,
+                    'error': f'Kalshi tag with id {kalshi_tag_id} not found'
+                }, status=404)
+
+            try:
+                polymarket_tag = Tag.objects.get(id=polymarket_tag_id, exchange=Exchange.POLYMARKET)
+            except Tag.DoesNotExist:
+                return JsonResponse({
+                    'success': False,
+                    'error': f'Polymarket tag with id {polymarket_tag_id} not found'
+                }, status=404)
+
+            # Calculate similarity score for the manual match
+            tag_matcher = TagMatcher()
+            kalshi_text = kalshi_tag.label
+            if kalshi_tag.category:
+                kalshi_text = f"{kalshi_tag.category} {kalshi_tag.label}"
+
+            score, breakdown = tag_matcher.compute_tag_similarity(
+                kalshi_text,
+                polymarket_tag.label
+            )
+            reason = tag_matcher.generate_tag_match_reason(breakdown)
+
+            # Create or update the tag match
+            tag_match, created = TagMatch.objects.update_or_create(
+                kalshi_tag=kalshi_tag,
+                polymarket_tag=polymarket_tag,
+                defaults={
+                    'similarity_score': score,
+                    'match_reason': f"Manual match | {reason}",
+                    'is_manual': True
+                }
+            )
+
+            return JsonResponse({
+                'success': True,
+                'created': created,
+                'tag_match': {
+                    'id': tag_match.id,
+                    'kalshi_tag': {
+                        'id': kalshi_tag.id,
+                        'label': kalshi_tag.label,
+                        'slug': kalshi_tag.slug,
+                        'category': kalshi_tag.category,
+                    },
+                    'polymarket_tag': {
+                        'id': polymarket_tag.id,
+                        'external_id': polymarket_tag.external_id,
+                        'label': polymarket_tag.label,
+                        'slug': polymarket_tag.slug,
+                    },
+                    'similarity_score': tag_match.similarity_score,
+                    'match_reason': tag_match.match_reason,
+                    'is_manual': tag_match.is_manual,
+                }
+            })
+
+        except json.JSONDecodeError:
+            return JsonResponse({
+                'success': False,
+                'error': 'Invalid JSON in request body'
+            }, status=400)
+        except Exception as e:
+            return JsonResponse({
+                'success': False,
+                'error': str(e)
+            }, status=500)
+
+    return JsonResponse({'error': 'POST required'}, status=405)
+
+
+@csrf_exempt
+def delete_tag_match(request, match_id):
+    """Delete a tag match"""
+    if request.method == 'DELETE' or request.method == 'POST':
+        try:
+            tag_match = get_object_or_404(TagMatch, id=match_id)
+            tag_match.delete()
+
+            return JsonResponse({
+                'success': True,
+                'message': f'Tag match {match_id} deleted'
+            })
+
+        except Exception as e:
+            return JsonResponse({
+                'success': False,
+                'error': str(e)
+            }, status=500)
+
+    return JsonResponse({'error': 'DELETE or POST required'}, status=405)
 
 
 @csrf_exempt

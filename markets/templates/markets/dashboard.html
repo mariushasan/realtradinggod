@@ -49,7 +49,7 @@
                         <div class="category-tags">
                             {% for tag in tags %}
                             <label class="tag-checkbox">
-                                <input type="checkbox" name="kalshi_tag" value="{{ tag.slug }}" data-label="{{ tag.label }}">
+                                <input type="checkbox" name="kalshi_tag" value="{{ tag.slug }}" data-label="{{ tag.label }}" data-tag-id="{{ tag.id }}">
                                 <span class="tag-label">{{ tag.label }}</span>
                             </label>
                             {% endfor %}
@@ -76,7 +76,7 @@
                 <div class="category-tags">
                     {% for tag in polymarket_tags %}
                     <label class="tag-checkbox">
-                        <input type="checkbox" name="polymarket_tag" value="{{ tag.external_id }}" data-label="{{ tag.label }}">
+                        <input type="checkbox" name="polymarket_tag" value="{{ tag.external_id }}" data-label="{{ tag.label }}" data-tag-id="{{ tag.id }}">
                         <span class="tag-label">{{ tag.label }}</span>
                     </label>
                     {% endfor %}
@@ -89,6 +89,80 @@
     </div>
 </div>
 
+<!-- Manual Tag Match Button -->
+<div class="manual-match-section">
+    <button class="btn" onclick="createManualTagMatch()" id="manualMatchBtn">
+        Create Manual Tag Match
+        <span class="loading" id="manualMatchLoading">...</span>
+    </button>
+    <span class="help-text">Select one tag from Kalshi and one from Polymarket above, then click to create a match</span>
+</div>
+
+<!-- Matched Tags Section -->
+<div class="section-header">
+    <h2>Matched Tags</h2>
+    <span class="page-info">{{ tag_match_count }} matches</span>
+</div>
+
+<div class="matched-tags-section">
+    {% if tag_matches %}
+    <div class="matched-tags-container">
+        <table class="matched-tags-table">
+            <thead>
+                <tr>
+                    <th><input type="checkbox" id="selectAllMatches" onchange="toggleAllMatches(this.checked)"></th>
+                    <th>Kalshi Tag</th>
+                    <th>Polymarket Tag</th>
+                    <th>Score</th>
+                    <th>Reason</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for match in tag_matches %}
+                <tr class="tag-match-row {% if match.is_manual %}manual-match{% endif %}">
+                    <td>
+                        <input type="checkbox"
+                               name="tag_match"
+                               value="{{ match.id }}"
+                               data-kalshi-slug="{{ match.kalshi_tag.slug }}"
+                               data-polymarket-id="{{ match.polymarket_tag.external_id }}">
+                    </td>
+                    <td>
+                        <span class="tag-badge kalshi">
+                            {% if match.kalshi_tag.category %}{{ match.kalshi_tag.category }}: {% endif %}{{ match.kalshi_tag.label }}
+                        </span>
+                    </td>
+                    <td>
+                        <span class="tag-badge polymarket">{{ match.polymarket_tag.label }}</span>
+                    </td>
+                    <td class="score-cell">
+                        <span class="score-badge {% if match.similarity_score >= 0.7 %}high{% elif match.similarity_score >= 0.5 %}medium{% else %}low{% endif %}">
+                            {{ match.similarity_score|floatformat:2 }}
+                        </span>
+                    </td>
+                    <td class="reason-cell">{{ match.match_reason|truncatechars:50 }}</td>
+                    <td>
+                        {% if match.is_manual %}
+                        <span class="badge manual">Manual</span>
+                        {% endif %}
+                        <button class="btn-small danger" onclick="deleteTagMatch({{ match.id }})" title="Delete match">
+                            &times;
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <p>No tag matches found.</p>
+        <p>Click "Refresh Tags from API" to automatically find semantic matches between Kalshi and Polymarket tags.</p>
+    </div>
+    {% endif %}
+</div>
+
 <div class="section-header">
     <h2>Actions</h2>
     <div>
@@ -99,6 +173,10 @@
         <button class="btn" onclick="refreshOpportunities()" id="refreshBtn">
             Refresh Opportunities
             <span class="loading" id="refreshLoading">...</span>
+        </button>
+        <button class="btn secondary" onclick="syncFromMatchedTags()" id="syncMatchedBtn">
+            Sync from Matched Tags
+            <span class="loading" id="syncMatchedLoading">...</span>
         </button>
     </div>
 </div>
@@ -297,10 +375,183 @@
             const data = await response.json();
 
             if (data.success) {
-                showToast(`Synced ${data.kalshi_synced} Kalshi tags, ${data.polymarket_synced} Polymarket tags. Reloading...`);
+                const matchMsg = data.tag_matches_found ? `, ${data.tag_matches_found} tag matches found` : '';
+                showToast(`Synced ${data.kalshi_synced} Kalshi tags, ${data.polymarket_synced} Polymarket tags${matchMsg}. Reloading...`);
                 setTimeout(() => location.reload(), 1000);
             } else {
                 showToast('Error refreshing tags: ' + data.error, 'error');
+            }
+        } catch (e) {
+            showToast('Network error: ' + e.message, 'error');
+        } finally {
+            btn.disabled = false;
+            loading.style.display = 'none';
+        }
+    }
+
+    function toggleAllMatches(checked) {
+        document.querySelectorAll('input[name="tag_match"]').forEach(cb => {
+            cb.checked = checked;
+        });
+    }
+
+    function getSelectedSingleTags() {
+        // Get selected single tags (for manual matching - only one from each)
+        const kalshiChecked = document.querySelectorAll('input[name="kalshi_tag"]:checked');
+        const polyChecked = document.querySelectorAll('input[name="polymarket_tag"]:checked');
+
+        return {
+            kalshiTag: kalshiChecked.length === 1 ? {
+                id: kalshiChecked[0].closest('label').querySelector('input').dataset.id || kalshiChecked[0].value,
+                label: kalshiChecked[0].dataset.label
+            } : null,
+            polymarketTag: polyChecked.length === 1 ? {
+                id: polyChecked[0].closest('label').querySelector('input').dataset.id || polyChecked[0].value,
+                label: polyChecked[0].dataset.label
+            } : null,
+            kalshiCount: kalshiChecked.length,
+            polymarketCount: polyChecked.length
+        };
+    }
+
+    async function createManualTagMatch() {
+        const btn = document.getElementById('manualMatchBtn');
+        const loading = document.getElementById('manualMatchLoading');
+
+        // Get the selected single tags with their database IDs
+        const kalshiChecked = document.querySelectorAll('input[name="kalshi_tag"]:checked');
+        const polyChecked = document.querySelectorAll('input[name="polymarket_tag"]:checked');
+
+        if (kalshiChecked.length !== 1 || polyChecked.length !== 1) {
+            showToast('Please select exactly one Kalshi tag and one Polymarket tag to create a manual match.', 'error');
+            return;
+        }
+
+        // Get the tag IDs from data attributes
+        const kalshiTagId = kalshiChecked[0].dataset.tagId;
+        const polymarketTagId = polyChecked[0].dataset.tagId;
+
+        if (!kalshiTagId || !polymarketTagId) {
+            showToast('Could not find tag IDs. Please refresh the page and try again.', 'error');
+            return;
+        }
+
+        btn.disabled = true;
+        loading.style.display = 'inline';
+
+        try {
+            const response = await fetch('{% url "markets:create_tag_match" %}', {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': getCookie('csrftoken'),
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    kalshi_tag_id: parseInt(kalshiTagId),
+                    polymarket_tag_id: parseInt(polymarketTagId)
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                const action = data.created ? 'Created' : 'Updated';
+                showToast(`${action} tag match: ${data.tag_match.kalshi_tag.label} <-> ${data.tag_match.polymarket_tag.label}`);
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                showToast('Error creating tag match: ' + data.error, 'error');
+            }
+        } catch (e) {
+            showToast('Network error: ' + e.message, 'error');
+        } finally {
+            btn.disabled = false;
+            loading.style.display = 'none';
+        }
+    }
+
+    async function deleteTagMatch(matchId) {
+        if (!confirm('Are you sure you want to delete this tag match?')) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/tag-matches/${matchId}/delete/`, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': getCookie('csrftoken'),
+                }
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                showToast('Tag match deleted');
+                setTimeout(() => location.reload(), 500);
+            } else {
+                showToast('Error deleting tag match: ' + data.error, 'error');
+            }
+        } catch (e) {
+            showToast('Network error: ' + e.message, 'error');
+        }
+    }
+
+    function getSelectedMatchedTags() {
+        const kalshiSlugs = [];
+        const polymarketIds = [];
+
+        document.querySelectorAll('input[name="tag_match"]:checked').forEach(cb => {
+            const kalshiSlug = cb.dataset.kalshiSlug;
+            const polymarketId = cb.dataset.polymarketId;
+            if (kalshiSlug && !kalshiSlugs.includes(kalshiSlug)) {
+                kalshiSlugs.push(kalshiSlug);
+            }
+            if (polymarketId && !polymarketIds.includes(polymarketId)) {
+                polymarketIds.push(polymarketId);
+            }
+        });
+
+        return { kalshiSlugs, polymarketIds };
+    }
+
+    async function syncFromMatchedTags() {
+        const { kalshiSlugs, polymarketIds } = getSelectedMatchedTags();
+
+        if (kalshiSlugs.length === 0 && polymarketIds.length === 0) {
+            showToast('Please select at least one matched tag pair to sync markets.', 'error');
+            return;
+        }
+
+        const btn = document.getElementById('syncMatchedBtn');
+        const loading = document.getElementById('syncMatchedLoading');
+
+        btn.disabled = true;
+        loading.style.display = 'inline';
+
+        try {
+            const body = {};
+            if (kalshiSlugs.length > 0) {
+                body.kalshi_tags = kalshiSlugs;
+            }
+            if (polymarketIds.length > 0) {
+                body.polymarket_tags = polymarketIds;
+            }
+
+            const response = await fetch('{% url "markets:sync_markets" %}', {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': getCookie('csrftoken'),
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(body)
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                showToast(`Synced from matched tags: ${data.kalshi_synced} Kalshi, ${data.polymarket_synced} Polymarket markets`);
+                setTimeout(() => location.reload(), 1500);
+            } else {
+                showToast('Error: ' + data.error, 'error');
             }
         } catch (e) {
             showToast('Network error: ' + e.message, 'error');
