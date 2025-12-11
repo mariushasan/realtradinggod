@@ -17,12 +17,15 @@ class KalshiClient:
     BASE_URL = 'https://api.elections.kalshi.com/trade-api/v2'
     MAX_RETRIES = 3
     RETRY_DELAY = 2
+    # Rate limit: 20 requests/second for reads. Use 60ms min interval (~16 req/sec) for safety margin
+    MIN_REQUEST_INTERVAL = 0.06
 
     def __init__(self, api_key_id: str = None, private_key_pem: str = None):
         self.api_key_id = api_key_id or os.environ.get('KALSHI_API_KEY_ID', '').strip('"\'')
         private_key_str = private_key_pem or os.environ.get('KALSHI_PRIVATE_KEY', '')
 
         self.private_key = None
+        self._last_request_time = 0.0  # For rate limiting
         if private_key_str and len(private_key_str) > 100:  # Valid key should be much longer
             try:
                 # Strip quotes if present
@@ -69,8 +72,17 @@ class KalshiClient:
 
         return headers
 
+    def _rate_limit(self):
+        """Enforce rate limiting between API requests"""
+        now = time.monotonic()
+        elapsed = now - self._last_request_time
+        if elapsed < self.MIN_REQUEST_INTERVAL:
+            sleep_time = self.MIN_REQUEST_INTERVAL - elapsed
+            time.sleep(sleep_time)
+        self._last_request_time = time.monotonic()
+
     def _request(self, method: str, path: str, params: dict = None) -> dict:
-        """Make request to Kalshi API with retry logic"""
+        """Make request to Kalshi API with retry logic and rate limiting"""
         url = self.BASE_URL + path
 
         if params:
@@ -88,6 +100,8 @@ class KalshiClient:
         last_error = None
         for attempt in range(self.MAX_RETRIES):
             try:
+                # Enforce rate limiting before each request attempt
+                self._rate_limit()
                 response = requests.request(method, url, headers=headers, timeout=30)
                 response.raise_for_status()
                 return response.json()
