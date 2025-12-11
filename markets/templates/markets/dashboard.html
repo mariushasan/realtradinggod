@@ -142,7 +142,25 @@
             <label for="closeBeforeDate">Closes Before:</label>
             <input type="date" id="closeBeforeDate" class="date-input">
         </div>
-        <button class="btn-small" onclick="clearDateFilters()">Clear</button>
+    </div>
+    <div class="date-filters" style="margin-top: 12px;">
+        <div class="date-input-group">
+            <label for="syncVolumeMin">Min Volume ($):</label>
+            <input type="number" id="syncVolumeMin" class="filter-input" placeholder="0" min="0">
+        </div>
+        <div class="date-input-group">
+            <label for="syncVolumeMax">Max Volume ($):</label>
+            <input type="number" id="syncVolumeMax" class="filter-input" placeholder="No limit" min="0">
+        </div>
+        <div class="date-input-group">
+            <label for="syncLiquidityMin">Min Liquidity ($):</label>
+            <input type="number" id="syncLiquidityMin" class="filter-input" placeholder="0" min="0">
+        </div>
+        <div class="date-input-group">
+            <label for="syncLiquidityMax">Max Liquidity ($):</label>
+            <input type="number" id="syncLiquidityMax" class="filter-input" placeholder="No limit" min="0">
+        </div>
+        <button class="btn-small" onclick="clearSyncFilters()">Clear All</button>
     </div>
 </div>
 
@@ -854,15 +872,23 @@
         return { kalshiTags, polymarketTags };
     }
 
-    function getDateFilters() {
+    function getSyncFilters() {
         const closeAfter = document.getElementById('closeAfterDate').value;
         const closeBefore = document.getElementById('closeBeforeDate').value;
-        return { closeAfter, closeBefore };
+        const volumeMin = document.getElementById('syncVolumeMin').value;
+        const volumeMax = document.getElementById('syncVolumeMax').value;
+        const liquidityMin = document.getElementById('syncLiquidityMin').value;
+        const liquidityMax = document.getElementById('syncLiquidityMax').value;
+        return { closeAfter, closeBefore, volumeMin, volumeMax, liquidityMin, liquidityMax };
     }
 
-    function clearDateFilters() {
+    function clearSyncFilters() {
         document.getElementById('closeAfterDate').value = '';
         document.getElementById('closeBeforeDate').value = '';
+        document.getElementById('syncVolumeMin').value = '';
+        document.getElementById('syncVolumeMax').value = '';
+        document.getElementById('syncLiquidityMin').value = '';
+        document.getElementById('syncLiquidityMax').value = '';
     }
 
     async function syncEvents() {
@@ -874,7 +900,7 @@
 
         try {
             const { kalshiTags, polymarketTags } = getSelectedTags();
-            const { closeAfter, closeBefore } = getDateFilters();
+            const { closeAfter, closeBefore, volumeMin, volumeMax, liquidityMin, liquidityMax } = getSyncFilters();
 
             const body = {};
             if (kalshiTags.length > 0) {
@@ -888,6 +914,18 @@
             }
             if (closeBefore) {
                 body.close_before = closeBefore;
+            }
+            if (volumeMin) {
+                body.volume_min = volumeMin;
+            }
+            if (volumeMax) {
+                body.volume_max = volumeMax;
+            }
+            if (liquidityMin) {
+                body.liquidity_min = liquidityMin;
+            }
+            if (liquidityMax) {
+                body.liquidity_max = liquidityMax;
             }
 
             const response = await fetch('{% url "markets:sync_markets" %}', {
@@ -937,7 +975,7 @@
         loading.style.display = 'inline';
 
         try {
-            const { closeAfter, closeBefore } = getDateFilters();
+            const { closeAfter, closeBefore, volumeMin, volumeMax, liquidityMin, liquidityMax } = getSyncFilters();
 
             const body = {
                 kalshi_tags: kalshiTags,
@@ -948,6 +986,18 @@
             }
             if (closeBefore) {
                 body.close_before = closeBefore;
+            }
+            if (volumeMin) {
+                body.volume_min = volumeMin;
+            }
+            if (volumeMax) {
+                body.volume_max = volumeMax;
+            }
+            if (liquidityMin) {
+                body.liquidity_min = liquidityMin;
+            }
+            if (liquidityMax) {
+                body.liquidity_max = liquidityMax;
             }
 
             const response = await fetch('{% url "markets:sync_markets" %}', {

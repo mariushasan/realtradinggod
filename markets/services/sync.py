@@ -197,6 +197,22 @@ class EventSyncService:
 
             logger.info(f"Processing {len(events_data)} total Kalshi events (deduplicated)")
 
+            # Parse date filters for client-side filtering
+            close_after_dt = None
+            close_before_dt = None
+            if close_after:
+                try:
+                    close_after_dt = datetime.strptime(close_after, '%Y-%m-%d')
+                except ValueError:
+                    pass
+            if close_before:
+                try:
+                    close_before_dt = datetime.strptime(close_before, '%Y-%m-%d').replace(
+                        hour=23, minute=59, second=59
+                    )
+                except ValueError:
+                    pass
+
             # First pass: prepare all event objects
             for event_data in events_data:
                 event_ticker = event_data.get('event_ticker', '')
@@ -205,47 +221,34 @@ class EventSyncService:
 
                 markets = event_data.get('markets', [])
 
-                # Filter by close_before if provided (do it client-side since API doesn't support it)
-                if close_before:
-                    if markets:
+                # Find the latest close time among markets for this event
+                event_close_time = None
+                for market in markets:
+                    close_time_str = market.get('close_time')
+                    if close_time_str:
                         try:
-                            close_before_dt = datetime.strptime(close_before, '%Y-%m-%d').replace(
-                                hour=23, minute=59, second=59
-                            )
-                            # Check if any market closes before the specified date
-                            has_valid_market = False
-                            for market in markets:
-                                close_time_str = market.get('close_time')
-                                if close_time_str:
-                                    close_time = datetime.fromisoformat(
-                                        close_time_str.replace('Z', '+00:00')
-                                    ).replace(tzinfo=None)
-                                    if close_time <= close_before_dt:
-                                        has_valid_market = True
-                                        break
-                            if not has_valid_market:
-                                continue
-                        except ValueError:
+                            market_close = datetime.fromisoformat(
+                                close_time_str.replace('Z', '+00:00')
+                            ).replace(tzinfo=None)
+                            if event_close_time is None or market_close > event_close_time:
+                                event_close_time = market_close
+                        except Exception:
                             pass
+
+                # Client-side date filtering (multivariate events don't support API filtering)
+                if close_after_dt and event_close_time:
+                    if event_close_time < close_after_dt:
+                        continue  # Event closes before the "closes after" date, skip it
+
+                if close_before_dt and event_close_time:
+                    if event_close_time > close_before_dt:
+                        continue  # Event closes after the "closes before" date, skip it
 
                 # Build URL - Kalshi uses event ticker in URL
                 url = f"https://kalshi.com/markets/{event_ticker}"
 
-                # Parse end date from the first market's close time
-                end_date = None
-                if markets:
-                    # Find the latest close time among markets
-                    for market in markets:
-                        close_time_str = market.get('close_time')
-                        if close_time_str:
-                            try:
-                                market_close = datetime.fromisoformat(
-                                    close_time_str.replace('Z', '+00:00')
-                                )
-                                if end_date is None or market_close > end_date:
-                                    end_date = market_close
-                            except Exception:
-                                pass
+                # Use the already computed event_close_time as end_date
+                end_date = event_close_time
 
                 # Calculate aggregated volume from markets
                 total_volume = sum(m.get('volume', 0) or 0 for m in markets)
