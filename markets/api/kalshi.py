@@ -157,7 +157,8 @@ class KalshiClient:
         cursor: str = None,
         with_nested_markets: bool = True,
         series_ticker: str = None,
-        min_close_ts: int = None
+        min_close_ts: int = None,
+        max_close_ts: int = None
     ) -> dict:
         """Get events from Kalshi with optional filtering"""
         params = {
@@ -166,7 +167,8 @@ class KalshiClient:
             'cursor': cursor,
             'with_nested_markets': str(with_nested_markets).lower(),
             'series_ticker': series_ticker,
-            'min_close_ts': min_close_ts
+            'min_close_ts': min_close_ts,
+            'max_close_ts': max_close_ts
         }
         return self._request('GET', '/events', params)
 
@@ -354,7 +356,7 @@ class KalshiClient:
                 collection_ticker=collection_ticker
             )
             events = response.get('events', [])
-            print(len(events))
+
             all_events.extend(events)
 
             cursor = response.get('cursor')

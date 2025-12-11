@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import List, Dict, Optional
 import logging
 import json
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from django.utils import timezone
@@ -12,8 +13,8 @@ from markets.api import KalshiClient, PolymarketClient
 logger = logging.getLogger(__name__)
 
 # Batch size for bulk operations
-BATCH_SIZE = 2000
-
+BATCH_SIZE = 500
+PRINT = False
 
 class EventSyncService:
     """Service to sync event data from exchanges to database"""
@@ -21,9 +22,15 @@ class EventSyncService:
     def __init__(self):
         self.kalshi_client = KalshiClient()
         self.poly_client = PolymarketClient()
+        self.debug = False
+        # Debug: save first 5 event_data samples for each exchange
+        self._kalshi_events_saved = 0
+        self._polymarket_events_saved = 0
+        self._debug_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'event_debug')
 
     def _bulk_create_events(self, events: List[Event], exchange: Exchange) -> Dict[str, Event]:
         """Bulk create/update events and return a dict mapping external_id to Event"""
+        
         if not events:
             return {}
 
@@ -246,12 +253,23 @@ class EventSyncService:
         market_data_batch: Dict[str, dict]
     ) -> bool:
         """Process a single Kalshi event and add to batch if it passes filters. Returns True if added."""
+        # Debug: Save first 5 event_data samples
+        if self._kalshi_events_saved < 5 and self.debug:
+            kalshi_dir = os.path.join(self._debug_dir, 'kalshi')
+            os.makedirs(kalshi_dir, exist_ok=True)
+            filepath = os.path.join(kalshi_dir, f'event_{self._kalshi_events_saved}.json')
+            with open(filepath, 'w') as f:
+                json.dump(event_data, f, indent=2, default=str)
+            self._kalshi_events_saved += 1
+        
         event_ticker = event_data.get('event_ticker', '')
+
+        title = event_data.get('title', '').lower()
+
         if not event_ticker:
             return False
-
+        
         markets = event_data.get('markets', [])
-
         # Find the latest close time among markets for this event
         event_close_time = None
         for market in markets:
@@ -265,25 +283,21 @@ class EventSyncService:
                         event_close_time = market_close
                 except Exception:
                     pass
-
         # Client-side date filtering
         if close_after_dt and event_close_time:
             if event_close_time < close_after_dt:
                 return False
-
         if close_before_dt and event_close_time:
             if event_close_time > close_before_dt:
                 return False
 
         # Build URL
         url = f"https://kalshi.com/markets/{event_ticker}"
-
         # Calculate aggregated volume from markets
         total_volume = sum(m.get('volume', 0) or 0 for m in markets)
         total_volume_24h = sum(m.get('volume_24h', 0) or 0 for m in markets)
         total_liquidity = sum(m.get('liquidity', 0) or 0 for m in markets)
         total_open_interest = sum(m.get('open_interest', 0) or 0 for m in markets)
-
         # Client-side volume/liquidity filtering
         if volume_min is not None and total_volume < volume_min:
             return False
@@ -293,7 +307,6 @@ class EventSyncService:
             return False
         if liquidity_max is not None and total_liquidity > liquidity_max:
             return False
-
         # Create Event object
         events_batch.append(Event(
             exchange=Exchange.KALSHI,
@@ -310,13 +323,11 @@ class EventSyncService:
             mutually_exclusive=event_data.get('mutually_exclusive', False),
             end_date=event_close_time
         ))
-
         # Store market data
         market_data_batch[event_ticker] = {
             'markets': markets,
             'url': url
         }
-
         return True
 
     def sync_kalshi_events(
@@ -340,12 +351,20 @@ class EventSyncService:
 
         # Convert date strings to Unix timestamps for Kalshi API
         min_close_ts = None
+        max_close_ts = None
         if close_after:
             try:
                 dt = datetime.strptime(close_after, '%Y-%m-%d')
                 min_close_ts = int(dt.timestamp())
             except ValueError:
                 logger.warning(f"Invalid close_after date format: {close_after}")
+
+        if close_before:
+            try:
+                dt = datetime.strptime(close_before, '%Y-%m-%d')
+                max_close_ts = int(dt.timestamp())
+            except ValueError:
+                logger.warning(f"Invalid close_before date format: {close_before}")
 
         # Parse date filters for client-side filtering
         close_after_dt = None
@@ -383,9 +402,12 @@ class EventSyncService:
                             cursor=cursor,
                             with_nested_markets=True,
                             series_ticker=series_ticker,
-                            min_close_ts=min_close_ts
+                            min_close_ts=min_close_ts,
+                            max_close_ts=max_close_ts
                         )
                         events = response.get('events', [])
+
+                        print("number of events kalshi: ", len(events))
 
                         for event_data in events:
                             ticker = event_data.get('event_ticker', '')
@@ -396,6 +418,7 @@ class EventSyncService:
                                     volume_min, volume_max, liquidity_min, liquidity_max,
                                     events_batch, market_data_batch
                                 )
+                                print("number of events kalshi batch: ", len(events_batch))
 
                                 # Flush if batch is full
                                 if len(events_batch) >= BATCH_SIZE:
@@ -417,7 +440,7 @@ class EventSyncService:
                         min_close_ts=min_close_ts
                     )
                     events = response.get('events', [])
-
+                    print("number of events kalshi", len(events))
                     for event_data in events:
                         ticker = event_data.get('event_ticker', '')
                         if ticker and ticker not in seen_tickers:
@@ -427,7 +450,6 @@ class EventSyncService:
                                 volume_min, volume_max, liquidity_min, liquidity_max,
                                 events_batch, market_data_batch
                             )
-
                             # Flush if batch is full
                             if len(events_batch) >= BATCH_SIZE:
                                 self._flush_kalshi_batch(events_batch, market_data_batch, total_events)
@@ -627,6 +649,15 @@ class EventSyncService:
         market_data_batch: Dict[str, dict]
     ) -> bool:
         """Process a single Polymarket event and add to batch. Returns True if added."""
+        # Debug: Save first 5 event_data samples
+        if self._polymarket_events_saved < 5 and self.debug:
+            poly_dir = os.path.join(self._debug_dir, 'polymarket')
+            os.makedirs(poly_dir, exist_ok=True)
+            filepath = os.path.join(poly_dir, f'event_{self._polymarket_events_saved}.json')
+            with open(filepath, 'w') as f:
+                json.dump(event_data, f, indent=2, default=str)
+            self._polymarket_events_saved += 1
+        
         event_id = event_data.get('id', '')
         slug = event_data.get('slug', '')
         if not event_id and not slug:
@@ -713,7 +744,7 @@ class EventSyncService:
             if tag_ids:
                 for tag_id in tag_ids:
                     offset = 0
-                    limit = 100
+                    limit = 200
 
                     while True:
                         try:
@@ -762,7 +793,7 @@ class EventSyncService:
             else:
                 # Fetch all events page by page
                 offset = 0
-                limit = 100
+                limit = 200
 
                 while True:
                     try:
@@ -787,7 +818,7 @@ class EventSyncService:
                         events = response.get('data', [])
                     else:
                         events = []
-
+                    print("number of events polymarket: ", len(events))
                     if not events:
                         break
 
