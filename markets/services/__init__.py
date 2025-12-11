@@ -1,5 +1,5 @@
-from .matcher import MarketMatcher
+from .matcher import EventMatcher, MarketMatcher
 from .arbitrage import ArbitrageDetector
-from .sync import MarketSyncService
+from .sync import EventSyncService, MarketSyncService
 
-__all__ = ['MarketMatcher', 'ArbitrageDetector', 'MarketSyncService']
+__all__ = ['EventMatcher', 'MarketMatcher', 'ArbitrageDetector', 'EventSyncService', 'MarketSyncService']

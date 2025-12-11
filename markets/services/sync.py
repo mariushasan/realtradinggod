@@ -6,14 +6,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from django.utils import timezone
 
-from markets.models import Market, Exchange, Tag, TagMatch
+from markets.models import Market, Event, Exchange, Tag, TagMatch
 from markets.api import KalshiClient, PolymarketClient
 
 logger = logging.getLogger(__name__)
 
 
-class MarketSyncService:
-    """Service to sync market data from exchanges to database"""
+class EventSyncService:
+    """Service to sync event data from exchanges to database"""
 
     def __init__(self):
         self.kalshi_client = KalshiClient()
@@ -95,7 +95,7 @@ class MarketSyncService:
         return synced
 
     def sync_all_tags(self, auto_match: bool = True) -> Dict:
-        """Sync tags from both exchanges and optionally find tag matches"""
+        """Sync tags from both exchanges"""
         result = {
             'kalshi': self.sync_kalshi_tags(),
             'polymarket': self.sync_polymarket_tags(),
@@ -104,251 +104,381 @@ class MarketSyncService:
 
         return result
 
-    def get_kalshi_tags_from_db(self) -> List[Tag]:
-        """Get Kalshi tags from database"""
-        return list(Tag.objects.filter(exchange=Exchange.KALSHI).order_by('category', 'label'))
-
-    def get_polymarket_tags_from_db(self) -> List[Tag]:
-        """Get Polymarket tags from database"""
-        return list(Tag.objects.filter(exchange=Exchange.POLYMARKET).order_by('label'))
-
-    def sync_kalshi_markets(
+    def sync_kalshi_events(
         self,
         tag_slugs: Optional[List[str]] = None,
         close_after: Optional[str] = None,
         close_before: Optional[str] = None
-    ) -> List[Market]:
+    ) -> List[Event]:
         """
-        Sync markets from Kalshi, optionally filtered by tag slugs and close date range.
-
-        Kalshi's API structure requires a two-step process:
-        1. Get series that match the selected categories (tags belong to categories)
-        2. Get markets for those series
+        Sync events from Kalshi with their nested markets.
 
         Args:
-            tag_slugs: List of tag slugs to filter by
-            close_after: ISO date string (YYYY-MM-DD) - only sync markets closing after this date
-            close_before: ISO date string (YYYY-MM-DD) - only sync markets closing before this date
+            tag_slugs: Not used currently (Kalshi events don't filter by tags directly)
+            close_after: ISO date string (YYYY-MM-DD) - only sync events with markets closing after this date
+            close_before: ISO date string (YYYY-MM-DD) - not directly supported by Kalshi events API
         """
-        synced = []
+        synced_events = []
 
         # Convert date strings to Unix timestamps for Kalshi API
         min_close_ts = None
-        max_close_ts = None
         if close_after:
             try:
                 dt = datetime.strptime(close_after, '%Y-%m-%d')
                 min_close_ts = int(dt.timestamp())
             except ValueError:
                 logger.warning(f"Invalid close_after date format: {close_after}")
-        if close_before:
-            try:
-                # Set to end of day for "before" filter
-                dt = datetime.strptime(close_before, '%Y-%m-%d').replace(hour=23, minute=59, second=59)
-                max_close_ts = int(dt.timestamp())
-            except ValueError:
-                logger.warning(f"Invalid close_before date format: {close_before}")
 
         try:
-            markets_data = []
-            seen_tickers = set()
+            # Fetch all events with nested markets
+            events_data = self.kalshi_client.get_all_open_events(min_close_ts=min_close_ts)
+            logger.info(f"Processing {len(events_data)} Kalshi events")
 
-            # No filter - fetch all open markets
-            markets_data = self.kalshi_client.get_all_open_markets(
-                min_close_ts=min_close_ts,
-                max_close_ts=max_close_ts
-            )
-
-            logger.info(f"Processing {len(markets_data)} Kalshi markets")
-
-            for market_data in markets_data:
-                ticker = market_data.get('ticker', '')
-                if not ticker:
+            for event_data in events_data:
+                event_ticker = event_data.get('event_ticker', '')
+                if not event_ticker:
                     continue
 
-                event_ticker = market_data.get('event_ticker', '')
-
-                # Extract prices
-                yes_ask = market_data.get('yes_ask', 0)
-                no_ask = market_data.get('no_ask', 0)
-
-                # Convert from cents to decimal if needed
-                if yes_ask and yes_ask > 1:
-                    yes_ask = yes_ask / 100
-                if no_ask and no_ask > 1:
-                    no_ask = no_ask / 100
-
-                outcomes = [
-                    {'name': 'Yes', 'price': yes_ask},
-                    {'name': 'No', 'price': no_ask}
-                ]
+                # Filter by close_before if provided (do it client-side since API doesn't support it)
+                if close_before:
+                    markets = event_data.get('markets', [])
+                    if markets:
+                        try:
+                            close_before_dt = datetime.strptime(close_before, '%Y-%m-%d').replace(
+                                hour=23, minute=59, second=59
+                            )
+                            # Check if any market closes before the specified date
+                            has_valid_market = False
+                            for market in markets:
+                                close_time_str = market.get('close_time')
+                                if close_time_str:
+                                    close_time = datetime.fromisoformat(
+                                        close_time_str.replace('Z', '+00:00')
+                                    ).replace(tzinfo=None)
+                                    if close_time <= close_before_dt:
+                                        has_valid_market = True
+                                        break
+                            if not has_valid_market:
+                                continue
+                        except ValueError:
+                            pass
 
                 # Build URL - Kalshi uses event ticker in URL
-                url = f"https://kalshi.com/markets/{event_ticker}" if event_ticker else ''
+                url = f"https://kalshi.com/markets/{event_ticker}"
 
-                # Parse close time
-                close_time = None
-                close_time_str = market_data.get('close_time')
-                if close_time_str:
-                    try:
-                        close_time = datetime.fromisoformat(
-                            close_time_str.replace('Z', '+00:00')
-                        )
-                    except Exception:
-                        pass
+                # Parse end date from the first market's close time
+                end_date = None
+                markets = event_data.get('markets', [])
+                if markets:
+                    # Find the latest close time among markets
+                    for market in markets:
+                        close_time_str = market.get('close_time')
+                        if close_time_str:
+                            try:
+                                market_close = datetime.fromisoformat(
+                                    close_time_str.replace('Z', '+00:00')
+                                )
+                                if end_date is None or market_close > end_date:
+                                    end_date = market_close
+                            except Exception:
+                                pass
 
-                market, created = Market.objects.update_or_create(
+                # Calculate aggregated volume from markets
+                total_volume = sum(m.get('volume', 0) or 0 for m in markets)
+                total_volume_24h = sum(m.get('volume_24h', 0) or 0 for m in markets)
+                total_liquidity = sum(m.get('liquidity', 0) or 0 for m in markets)
+                total_open_interest = sum(m.get('open_interest', 0) or 0 for m in markets)
+
+                # Create or update Event
+                event, created = Event.objects.update_or_create(
                     exchange=Exchange.KALSHI,
-                    external_id=ticker,
+                    external_id=event_ticker,
                     defaults={
-                        'event_external_id': event_ticker,
-                        'title': market_data.get('title', ticker),
-                        'description': market_data.get('rules_primary', ''),
-                        'outcomes': outcomes,
+                        'title': event_data.get('title', event_ticker),
+                        'description': event_data.get('sub_title', ''),
+                        'category': event_data.get('category', ''),
                         'url': url,
-                        'is_active': market_data.get('status') in ['active', 'open'],
-                        'close_time': close_time
+                        'volume': total_volume,
+                        'volume_24h': total_volume_24h,
+                        'liquidity': total_liquidity,
+                        'open_interest': total_open_interest,
+                        'is_active': True,
+                        'mutually_exclusive': event_data.get('mutually_exclusive', False),
+                        'end_date': end_date
                     }
                 )
+                synced_events.append(event)
 
-                synced.append(market)
+                # Sync nested markets for this event
+                for market_data in markets:
+                    ticker = market_data.get('ticker', '')
+                    if not ticker:
+                        continue
+
+                    # Extract prices
+                    yes_ask = market_data.get('yes_ask', 0)
+                    no_ask = market_data.get('no_ask', 0)
+
+                    # Convert from cents to decimal if needed
+                    if yes_ask and yes_ask > 1:
+                        yes_ask = yes_ask / 100
+                    if no_ask and no_ask > 1:
+                        no_ask = no_ask / 100
+
+                    outcomes = [
+                        {'name': 'Yes', 'price': yes_ask},
+                        {'name': 'No', 'price': no_ask}
+                    ]
+
+                    # Parse close time
+                    close_time = None
+                    close_time_str = market_data.get('close_time')
+                    if close_time_str:
+                        try:
+                            close_time = datetime.fromisoformat(
+                                close_time_str.replace('Z', '+00:00')
+                            )
+                        except Exception:
+                            pass
+
+                    Market.objects.update_or_create(
+                        exchange=Exchange.KALSHI,
+                        external_id=ticker,
+                        defaults={
+                            'event': event,
+                            'event_external_id': event_ticker,
+                            'title': market_data.get('title', ticker),
+                            'description': market_data.get('rules_primary', ''),
+                            'outcomes': outcomes,
+                            'url': url,
+                            'volume': market_data.get('volume', 0) or 0,
+                            'volume_24h': market_data.get('volume_24h', 0) or 0,
+                            'liquidity': market_data.get('liquidity', 0) or 0,
+                            'open_interest': market_data.get('open_interest', 0) or 0,
+                            'is_active': market_data.get('status') in ['active', 'open'],
+                            'close_time': close_time
+                        }
+                    )
+
+            logger.info(f"Synced {len(synced_events)} Kalshi events")
 
         except Exception as e:
-            logger.error(f"Error syncing Kalshi markets: {e}")
+            logger.error(f"Error syncing Kalshi events: {e}")
             raise
 
-        return synced
+        return synced_events
 
-    def sync_polymarket_markets(
+    def sync_polymarket_events(
         self,
         tag_ids: Optional[List[int]] = None,
         close_after: Optional[str] = None,
-        close_before: Optional[str] = None
-    ) -> List[Market]:
+        close_before: Optional[str] = None,
+        volume_min: Optional[float] = None,
+        liquidity_min: Optional[float] = None
+    ) -> List[Event]:
         """
-        Sync markets from Polymarket, optionally filtered by tag IDs and close date range.
+        Sync events from Polymarket with their nested markets.
 
         Args:
             tag_ids: List of tag IDs to filter by
-            close_after: ISO date string (YYYY-MM-DD) - only sync markets closing after this date
-            close_before: ISO date string (YYYY-MM-DD) - only sync markets closing before this date
+            close_after: ISO date string (YYYY-MM-DD) - only sync events closing after this date
+            close_before: ISO date string (YYYY-MM-DD) - only sync events closing before this date
+            volume_min: Minimum volume filter
+            liquidity_min: Minimum liquidity filter
         """
-        synced = []
+        synced_events = []
 
         # Convert date strings to ISO 8601 format for Polymarket API
         end_date_min = None
         end_date_max = None
         if close_after:
             try:
-                # Validate and format to ISO 8601
                 dt = datetime.strptime(close_after, '%Y-%m-%d')
                 end_date_min = dt.strftime('%Y-%m-%dT00:00:00.000Z')
             except ValueError:
                 logger.warning(f"Invalid close_after date format: {close_after}")
         if close_before:
             try:
-                # Set to end of day for "before" filter
                 dt = datetime.strptime(close_before, '%Y-%m-%d')
                 end_date_max = dt.strftime('%Y-%m-%dT23:59:59.999Z')
             except ValueError:
                 logger.warning(f"Invalid close_before date format: {close_before}")
 
         try:
-            markets_data = self.poly_client.get_all_active_markets(
-                end_date_min=end_date_min,
-                end_date_max=end_date_max
-            )
+            # Fetch events - if tag_ids provided, fetch for each tag
+            events_data = []
+            if tag_ids:
+                for tag_id in tag_ids:
+                    tag_events = self.poly_client.get_all_active_events(
+                        tag_id=tag_id,
+                        end_date_min=end_date_min,
+                        end_date_max=end_date_max,
+                        volume_min=volume_min,
+                        liquidity_min=liquidity_min
+                    )
+                    events_data.extend(tag_events)
+                # Deduplicate by event ID
+                seen_ids = set()
+                unique_events = []
+                for event in events_data:
+                    event_id = event.get('id', '')
+                    if event_id and event_id not in seen_ids:
+                        seen_ids.add(event_id)
+                        unique_events.append(event)
+                events_data = unique_events
+            else:
+                events_data = self.poly_client.get_all_active_events(
+                    end_date_min=end_date_min,
+                    end_date_max=end_date_max,
+                    volume_min=volume_min,
+                    liquidity_min=liquidity_min
+                )
 
-            for market_data in markets_data:
-                condition_id = market_data.get('conditionId', market_data.get('condition_id', ''))
-                if not condition_id:
+            logger.info(f"Processing {len(events_data)} Polymarket events")
+
+            for event_data in events_data:
+                event_id = event_data.get('id', '')
+                slug = event_data.get('slug', '')
+                if not event_id and not slug:
                     continue
 
-                # Extract outcomes and prices
-                outcomes = []
+                external_id = event_id or slug
 
-                # Handle JSON string format from Gamma API
-                outcome_names = market_data.get('outcomes', '[]')
-                outcome_prices = market_data.get('outcomePrices', '[]')
-
-                if isinstance(outcome_names, str):
-                    try:
-                        outcome_names = json.loads(outcome_names)
-                    except json.JSONDecodeError:
-                        outcome_names = []
-
-                if isinstance(outcome_prices, str):
-                    try:
-                        outcome_prices = json.loads(outcome_prices)
-                    except json.JSONDecodeError:
-                        outcome_prices = []
-
-                # Build outcomes list
-                for i, name in enumerate(outcome_names):
-                    price = float(outcome_prices[i]) if i < len(outcome_prices) else 0
-                    outcomes.append({
-                        'name': name,
-                        'price': price
-                    })
-
-                # Fallback to tokens format
-                if not outcomes:
-                    tokens = market_data.get('tokens', [])
-                    for token in tokens:
-                        outcome_name = token.get('outcome', '')
-                        price = float(token.get('price', 0))
-                        outcomes.append({
-                            'name': outcome_name,
-                            'price': price,
-                            'token_id': token.get('token_id', '')
-                        })
-
-                # Build URL from slug
-                # Polymarket URL format: https://polymarket.com/event/[slug]
-                slug = market_data.get('slug', '')
+                # Build URL
                 url = f"https://polymarket.com/event/{slug}" if slug else ''
 
-                # Parse close time
-                close_time = None
-                end_date = market_data.get('endDate', market_data.get('end_date_iso'))
-                if end_date:
+                # Parse end date
+                end_date = None
+                end_date_str = event_data.get('endDate')
+                if end_date_str:
                     try:
-                        close_time = datetime.fromisoformat(
-                            end_date.replace('Z', '+00:00')
+                        end_date = datetime.fromisoformat(
+                            end_date_str.replace('Z', '+00:00')
                         )
                     except Exception:
                         pass
 
-                market, created = Market.objects.update_or_create(
+                # Create or update Event
+                event, created = Event.objects.update_or_create(
                     exchange=Exchange.POLYMARKET,
-                    external_id=condition_id,
+                    external_id=external_id,
                     defaults={
-                        'event_external_id': slug,  # Store slug for URL building
-                        'title': market_data.get('question', market_data.get('title', '')),
-                        'description': market_data.get('description', ''),
-                        'outcomes': outcomes,
+                        'title': event_data.get('title', slug),
+                        'description': event_data.get('description', ''),
+                        'category': event_data.get('category', ''),
                         'url': url,
-                        'is_active': market_data.get('active', True),
-                        'close_time': close_time
+                        'volume': float(event_data.get('volume', 0) or 0),
+                        'volume_24h': float(event_data.get('volume24hr', 0) or 0),
+                        'liquidity': float(event_data.get('liquidity', 0) or 0),
+                        'open_interest': float(event_data.get('openInterest', 0) or 0),
+                        'is_active': event_data.get('active', True),
+                        'mutually_exclusive': event_data.get('negRisk', False),
+                        'end_date': end_date
                     }
                 )
+                synced_events.append(event)
 
-                synced.append(market)
+                # Sync nested markets for this event
+                markets_data = event_data.get('markets', [])
+                for market_data in markets_data:
+                    if not isinstance(market_data, dict):
+                        continue
+
+                    condition_id = market_data.get('conditionId', market_data.get('condition_id', ''))
+                    market_id = market_data.get('id', '')
+                    if not condition_id and not market_id:
+                        continue
+
+                    market_external_id = condition_id or market_id
+
+                    # Extract outcomes and prices
+                    outcomes = []
+                    outcome_names = market_data.get('outcomes', '[]')
+                    outcome_prices = market_data.get('outcomePrices', '[]')
+
+                    if isinstance(outcome_names, str):
+                        try:
+                            outcome_names = json.loads(outcome_names)
+                        except json.JSONDecodeError:
+                            outcome_names = []
+
+                    if isinstance(outcome_prices, str):
+                        try:
+                            outcome_prices = json.loads(outcome_prices)
+                        except json.JSONDecodeError:
+                            outcome_prices = []
+
+                    for i, name in enumerate(outcome_names):
+                        price = float(outcome_prices[i]) if i < len(outcome_prices) else 0
+                        outcomes.append({
+                            'name': name,
+                            'price': price
+                        })
+
+                    # Fallback to tokens format
+                    if not outcomes:
+                        tokens = market_data.get('tokens', [])
+                        for token in tokens:
+                            outcome_name = token.get('outcome', '')
+                            price = float(token.get('price', 0))
+                            outcomes.append({
+                                'name': outcome_name,
+                                'price': price,
+                                'token_id': token.get('token_id', '')
+                            })
+
+                    # Build market URL
+                    market_slug = market_data.get('slug', '')
+                    market_url = f"https://polymarket.com/event/{slug}" if slug else ''
+
+                    # Parse close time
+                    close_time = None
+                    market_end_date = market_data.get('endDate', market_data.get('end_date_iso'))
+                    if market_end_date:
+                        try:
+                            close_time = datetime.fromisoformat(
+                                market_end_date.replace('Z', '+00:00')
+                            )
+                        except Exception:
+                            pass
+
+                    Market.objects.update_or_create(
+                        exchange=Exchange.POLYMARKET,
+                        external_id=market_external_id,
+                        defaults={
+                            'event': event,
+                            'event_external_id': slug,
+                            'title': market_data.get('question', market_data.get('title', '')),
+                            'description': market_data.get('description', ''),
+                            'outcomes': outcomes,
+                            'url': market_url,
+                            'volume': float(market_data.get('volumeNum', market_data.get('volume', 0)) or 0),
+                            'volume_24h': float(market_data.get('volume24hr', 0) or 0),
+                            'liquidity': float(market_data.get('liquidityNum', market_data.get('liquidity', 0)) or 0),
+                            'open_interest': 0,
+                            'is_active': market_data.get('active', True),
+                            'close_time': close_time
+                        }
+                    )
+
+            logger.info(f"Synced {len(synced_events)} Polymarket events")
 
         except Exception as e:
-            logger.error(f"Error syncing Polymarket markets: {e}")
+            logger.error(f"Error syncing Polymarket events: {e}")
             raise
 
-        return synced
+        return synced_events
 
-    def sync_all(
+    def sync_all_events(
         self,
         kalshi_tag_slugs: Optional[List[str]] = None,
         polymarket_tag_ids: Optional[List[int]] = None,
         close_after: Optional[str] = None,
-        close_before: Optional[str] = None
-    ) -> Dict[str, List[Market]]:
-        """Sync markets from all exchanges in parallel, with optional tag and date filtering"""
+        close_before: Optional[str] = None,
+        volume_min: Optional[float] = None,
+        liquidity_min: Optional[float] = None
+    ) -> Dict[str, List[Event]]:
+        """Sync events from all exchanges in parallel, with optional filtering"""
         results = {
             'kalshi': [],
             'polymarket': []
@@ -358,16 +488,18 @@ class MarketSyncService:
         with ThreadPoolExecutor(max_workers=2) as executor:
             futures = {
                 executor.submit(
-                    self.sync_kalshi_markets,
+                    self.sync_kalshi_events,
                     kalshi_tag_slugs,
                     close_after,
                     close_before
                 ): 'kalshi',
                 executor.submit(
-                    self.sync_polymarket_markets,
+                    self.sync_polymarket_events,
                     polymarket_tag_ids,
                     close_after,
-                    close_before
+                    close_before,
+                    volume_min,
+                    liquidity_min
                 ): 'polymarket'
             }
 
@@ -375,8 +507,12 @@ class MarketSyncService:
                 exchange = futures[future]
                 try:
                     results[exchange] = future.result()
-                    logger.info(f"Synced {len(results[exchange])} {exchange} markets")
+                    logger.info(f"Synced {len(results[exchange])} {exchange} events")
                 except Exception as e:
                     logger.error(f"{exchange} sync failed: {e}")
 
         return results
+
+
+# Keep MarketSyncService as an alias for backwards compatibility
+MarketSyncService = EventSyncService

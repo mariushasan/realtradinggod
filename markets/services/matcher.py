@@ -5,13 +5,13 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 
-from markets.models import Market, MarketMatch, Exchange, Tag, TagMatch
+from markets.models import Event, EventMatch, Market, MarketMatch, Exchange, Tag, TagMatch
 
 
-class MarketMatcher:
-    """Improved NLP-based matching service for cross-exchange markets"""
+class EventMatcher:
+    """NLP-based matching service for cross-exchange events"""
 
-    SIMILARITY_THRESHOLD = 0.5  # Lowered threshold with better scoring
+    SIMILARITY_THRESHOLD = 0.5  # Threshold for matching
 
     # Common abbreviations and their expansions
     ABBREVIATIONS = {
@@ -63,7 +63,7 @@ class MarketMatcher:
     def expand_abbreviations(text: str) -> str:
         """Expand common abbreviations"""
         text = text.lower()
-        for abbrev, expansion in MarketMatcher.ABBREVIATIONS.items():
+        for abbrev, expansion in EventMatcher.ABBREVIATIONS.items():
             # Match whole words only
             text = re.sub(rf'\b{abbrev}\b', f'{abbrev} {expansion}', text)
         return text
@@ -99,10 +99,10 @@ class MarketMatcher:
 
     @staticmethod
     def detect_topic(text: str) -> Set[str]:
-        """Detect which topics this market belongs to"""
+        """Detect which topics this event belongs to"""
         text = text.lower()
         detected = set()
-        for topic, keywords in MarketMatcher.TOPICS.items():
+        for topic, keywords in EventMatcher.TOPICS.items():
             if any(kw in text for kw in keywords):
                 detected.add(topic)
         return detected
@@ -110,7 +110,7 @@ class MarketMatcher:
     @staticmethod
     def extract_key_terms(text: str) -> Set[str]:
         """Extract meaningful key terms"""
-        text = MarketMatcher.normalize_text(text)
+        text = EventMatcher.normalize_text(text)
         # Common words to ignore
         ignore_words = {
             'will', 'be', 'the', 'to', 'in', 'on', 'at', 'by', 'yes', 'no',
@@ -125,7 +125,7 @@ class MarketMatcher:
 
     def compute_similarity(self, text1: str, text2: str) -> Tuple[float, Dict]:
         """
-        Compute detailed similarity between two market titles.
+        Compute detailed similarity between two event titles.
         Returns (score, breakdown_dict)
         """
         # Expand abbreviations
@@ -214,9 +214,6 @@ class MarketMatcher:
         breakdown['tfidf_score'] = tfidf_score
 
         # Combined score with weights
-        # Year match is very important (same event likely has same year)
-        # Topic match helps narrow down
-        # Term overlap and TF-IDF for semantic similarity
         combined_score = (
             0.25 * year_score +      # Same year is strong signal
             0.10 * date_score +      # Same date even stronger
@@ -266,33 +263,97 @@ class MarketMatcher:
 
         return " | ".join(reasons) if reasons else "Low similarity match"
 
-    def _find_best_match_for_market(
+    def _find_best_match_for_event(
         self,
-        kalshi_market: Market,
-        polymarket_markets: List[Market],
+        kalshi_event: Event,
+        polymarket_events: List[Event],
         threshold: float
-    ) -> Tuple[Market, Market, float, str] | None:
-        """Find the best Polymarket match for a single Kalshi market"""
+    ) -> Tuple[Event, Event, float, str] | None:
+        """Find the best Polymarket match for a single Kalshi event"""
         best_match = None
         best_score = 0
         best_breakdown = {}
 
-        for poly_market in polymarket_markets:
+        for poly_event in polymarket_events:
             score, breakdown = self.compute_similarity(
-                kalshi_market.title,
-                poly_market.title
+                kalshi_event.title,
+                poly_event.title
             )
 
             if score > best_score:
                 best_score = score
-                best_match = poly_market
+                best_match = poly_event
                 best_breakdown = breakdown
 
         if best_match and best_score >= threshold:
             reason = self.generate_match_reason(best_breakdown)
-            return (kalshi_market, best_match, best_score, reason)
+            return (kalshi_event, best_match, best_score, reason)
 
         return None
+
+    def find_matches(
+        self,
+        kalshi_events: List[Event],
+        polymarket_events: List[Event],
+        threshold: float = None,
+        max_workers: int = 8
+    ) -> List[Tuple[Event, Event, float, str]]:
+        """
+        Find matching events between Kalshi and Polymarket using parallel processing.
+        Returns list of tuples: (kalshi_event, poly_event, similarity_score, reason)
+        """
+        threshold = threshold or self.SIMILARITY_THRESHOLD
+        matches = []
+
+        if not kalshi_events or not polymarket_events:
+            return matches
+
+        # Process Kalshi events in parallel
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(
+                    self._find_best_match_for_event,
+                    kalshi_event,
+                    polymarket_events,
+                    threshold
+                ): kalshi_event
+                for kalshi_event in kalshi_events
+            }
+
+            for future in as_completed(futures):
+                result = future.result()
+                if result:
+                    matches.append(result)
+
+        # Sort by similarity score descending
+        matches.sort(key=lambda x: x[2], reverse=True)
+
+        return matches
+
+    def create_match_records(
+        self,
+        matches: List[Tuple[Event, Event, float, str]]
+    ) -> List[EventMatch]:
+        """Create or update EventMatch records from matches"""
+        created_matches = []
+
+        for kalshi_event, poly_event, score, reason in matches:
+            match, created = EventMatch.objects.update_or_create(
+                kalshi_event=kalshi_event,
+                polymarket_event=poly_event,
+                defaults={
+                    'similarity_score': score,
+                    'match_reason': reason
+                }
+            )
+            created_matches.append(match)
+
+        return created_matches
+
+
+# Keep MarketMatcher as an alias for backwards compatibility
+class MarketMatcher(EventMatcher):
+    """Deprecated: Use EventMatcher instead. This class is kept for backwards compatibility."""
 
     def find_matches(
         self,
@@ -332,6 +393,34 @@ class MarketMatcher:
         matches.sort(key=lambda x: x[2], reverse=True)
 
         return matches
+
+    def _find_best_match_for_market(
+        self,
+        kalshi_market: Market,
+        polymarket_markets: List[Market],
+        threshold: float
+    ) -> Tuple[Market, Market, float, str] | None:
+        """Find the best Polymarket match for a single Kalshi market"""
+        best_match = None
+        best_score = 0
+        best_breakdown = {}
+
+        for poly_market in polymarket_markets:
+            score, breakdown = self.compute_similarity(
+                kalshi_market.title,
+                poly_market.title
+            )
+
+            if score > best_score:
+                best_score = score
+                best_match = poly_market
+                best_breakdown = breakdown
+
+        if best_match and best_score >= threshold:
+            reason = self.generate_match_reason(best_breakdown)
+            return (kalshi_market, best_match, best_score, reason)
+
+        return None
 
     def create_match_records(
         self,

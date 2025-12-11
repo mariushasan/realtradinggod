@@ -7,48 +7,18 @@ from django.views.decorators.http import require_POST
 from django.views.decorators.csrf import csrf_exempt
 from django.utils import timezone
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
+from django.db.models import Q
 
-from .models import Market, MarketMatch, ArbitrageOpportunity, Exchange, Tag, TagMatch
-from .services import MarketMatcher, ArbitrageDetector, MarketSyncService
+from .models import Market, Event, EventMatch, MarketMatch, ArbitrageOpportunity, Exchange, Tag, TagMatch
+from .services import EventMatcher, EventSyncService
 from .api import PolymarketClient
 
+
 class DashboardView(View):
-    """Main dashboard showing arbitrage opportunities"""
+    """Main dashboard showing events and matches"""
     ITEMS_PER_PAGE = 50
 
     def get(self, request):
-        # Sorting
-        sort = request.GET.get('sort', '-profit_percent')
-        valid_sorts = [
-            'profit_percent', '-profit_percent',
-            'expected_value', '-expected_value',
-            'arb_type', '-arb_type',
-            'updated_at', '-updated_at'
-        ]
-        if sort not in valid_sorts:
-            sort = '-profit_percent'
-
-        page = request.GET.get('page', 1)
-
-        # Get all active arbitrage opportunities (mixed)
-        opportunities = ArbitrageOpportunity.objects.filter(
-            is_active=True
-        ).select_related('market_match', 'market_match__kalshi_market', 'market_match__polymarket_market').prefetch_related('markets').order_by(sort)
-
-        # Pagination
-        paginator = Paginator(opportunities, self.ITEMS_PER_PAGE)
-        try:
-            opportunities_page = paginator.page(page)
-        except PageNotAnInteger:
-            opportunities_page = paginator.page(1)
-        except EmptyPage:
-            opportunities_page = paginator.page(paginator.num_pages)
-
-        # Get market counts
-        kalshi_count = Market.objects.filter(exchange=Exchange.KALSHI, is_active=True).count()
-        poly_count = Market.objects.filter(exchange=Exchange.POLYMARKET, is_active=True).count()
-        match_count = MarketMatch.objects.count()
-
         # Get tags for the filter UI
         kalshi_tags = Tag.objects.filter(exchange=Exchange.KALSHI).order_by('category', 'label')
         polymarket_tags = Tag.objects.filter(exchange=Exchange.POLYMARKET).order_by('label')
@@ -98,73 +68,46 @@ class DashboardView(View):
             for tm in tag_matches
         ]
 
-        context = {
-            'opportunities': opportunities_page,
-            'total_opportunities': paginator.count,
-            'kalshi_count': kalshi_count,
-            'poly_count': poly_count,
-            'match_count': match_count,
-            'current_sort': sort,
-            'kalshi_tags_by_category': kalshi_tags_by_category,
-            'polymarket_tags': polymarket_tags_list,
-            'tag_matches': tag_matches_list,
-            'tag_match_count': len(tag_matches_list),
-        }
+        # Get event counts
+        kalshi_event_count = Event.objects.filter(exchange=Exchange.KALSHI, is_active=True).count()
+        poly_event_count = Event.objects.filter(exchange=Exchange.POLYMARKET, is_active=True).count()
+        event_match_count = EventMatch.objects.count()
 
-        return render(request, 'markets/dashboard.html', context)
+        # Get events for each exchange
+        kalshi_events = Event.objects.filter(exchange=Exchange.KALSHI, is_active=True).order_by('-updated_at')[:100]
+        poly_events = Event.objects.filter(exchange=Exchange.POLYMARKET, is_active=True).order_by('-updated_at')[:100]
 
+        # Format events for template
+        kalshi_events_list = [
+            {
+                'id': e.id,
+                'external_id': e.external_id,
+                'title': e.title,
+                'url': e.url,
+                'volume': e.volume,
+                'liquidity': e.liquidity,
+                'category': e.category,
+                'end_date': e.end_date.isoformat() if e.end_date else None,
+            }
+            for e in kalshi_events
+        ]
 
-class MarketsListView(View):
-    """List all markets with pagination and sorting"""
-    ITEMS_PER_PAGE = 50
+        poly_events_list = [
+            {
+                'id': e.id,
+                'external_id': e.external_id,
+                'title': e.title,
+                'url': e.url,
+                'volume': e.volume,
+                'liquidity': e.liquidity,
+                'category': e.category,
+                'end_date': e.end_date.isoformat() if e.end_date else None,
+            }
+            for e in poly_events
+        ]
 
-    def get(self, request):
-        exchange_filter = request.GET.get('exchange', '')
-        sort = request.GET.get('sort', '-updated_at')
-        page = request.GET.get('page', 1)
-
-        # Valid sort options
-        valid_sorts = ['title', '-title', 'updated_at', '-updated_at', 'exchange', '-exchange']
-        if sort not in valid_sorts:
-            sort = '-updated_at'
-
-        markets = Market.objects.filter(is_active=True)
-
-        if exchange_filter:
-            markets = markets.filter(exchange=exchange_filter)
-
-        markets = markets.order_by(sort)
-
-        # Pagination
-        paginator = Paginator(markets, self.ITEMS_PER_PAGE)
-        try:
-            markets_page = paginator.page(page)
-        except PageNotAnInteger:
-            markets_page = paginator.page(1)
-        except EmptyPage:
-            markets_page = paginator.page(paginator.num_pages)
-
-        context = {
-            'markets': markets_page,
-            'exchange_filter': exchange_filter,
-            'exchanges': Exchange.choices,
-            'current_sort': sort,
-            'total_count': paginator.count,
-        }
-
-        return render(request, 'markets/markets_list.html', context)
-
-
-class MatchesListView(View):
-    """List all market matches with pagination and sorting"""
-    ITEMS_PER_PAGE = 25
-
-    def get(self, request):
-        verified_filter = request.GET.get('verified', '')
+        # Get event matches with pagination
         sort = request.GET.get('sort', '-similarity_score')
-        page = request.GET.get('page', 1)
-
-        # Valid sort options
         valid_sorts = [
             'similarity_score', '-similarity_score',
             'is_verified', '-is_verified',
@@ -173,51 +116,58 @@ class MatchesListView(View):
         if sort not in valid_sorts:
             sort = '-similarity_score'
 
-        matches = MarketMatch.objects.select_related(
-            'kalshi_market', 'polymarket_market'
+        page = request.GET.get('page', 1)
+
+        event_matches = EventMatch.objects.select_related(
+            'kalshi_event', 'polymarket_event'
         ).order_by(sort)
 
-        if verified_filter == 'true':
-            matches = matches.filter(is_verified=True)
-        elif verified_filter == 'false':
-            matches = matches.filter(is_verified=False)
-
         # Pagination
-        paginator = Paginator(matches, self.ITEMS_PER_PAGE)
+        paginator = Paginator(event_matches, self.ITEMS_PER_PAGE)
         try:
-            matches_page = paginator.page(page)
+            event_matches_page = paginator.page(page)
         except PageNotAnInteger:
-            matches_page = paginator.page(1)
+            event_matches_page = paginator.page(1)
         except EmptyPage:
-            matches_page = paginator.page(paginator.num_pages)
+            event_matches_page = paginator.page(paginator.num_pages)
 
         context = {
-            'matches': matches_page,
-            'verified_filter': verified_filter,
+            'kalshi_event_count': kalshi_event_count,
+            'poly_event_count': poly_event_count,
+            'event_match_count': event_match_count,
+            'kalshi_tags_by_category': kalshi_tags_by_category,
+            'polymarket_tags': polymarket_tags_list,
+            'tag_matches': tag_matches_list,
+            'tag_match_count': len(tag_matches_list),
+            'kalshi_events': kalshi_events_list,
+            'poly_events': poly_events_list,
+            'event_matches': event_matches_page,
+            'total_event_matches': paginator.count,
             'current_sort': sort,
-            'total_count': paginator.count,
         }
 
-        return render(request, 'markets/matches_list.html', context)
+        return render(request, 'markets/dashboard.html', context)
 
 
 @csrf_exempt
-def sync_markets(request):
-    """Sync markets from exchanges (fetch and save only), with optional tag and date filtering"""
+def sync_events(request):
+    """Sync events from exchanges with optional tag and date filtering"""
     if request.method == 'POST':
-        sync_service = MarketSyncService()
+        sync_service = EventSyncService()
 
         try:
-            # Parse request body for tag and date filters
+            # Parse request body for filters
             kalshi_tag_slugs = None
             polymarket_tag_ids = None
             close_after = None
             close_before = None
+            volume_min = None
+            liquidity_min = None
 
             if request.body:
                 try:
                     data = json.loads(request.body)
-                    # Kalshi: list of tag slugs (used to get categories, then series, then markets)
+                    # Kalshi: list of tag slugs
                     kalshi_tags = data.get('kalshi_tags', [])
                     if kalshi_tags:
                         kalshi_tag_slugs = kalshi_tags
@@ -230,20 +180,258 @@ def sync_markets(request):
                     # Date filters (ISO format strings: YYYY-MM-DD)
                     close_after = data.get('close_after')
                     close_before = data.get('close_before')
+
+                    # Volume/liquidity filters
+                    if data.get('volume_min'):
+                        volume_min = float(data.get('volume_min'))
+                    if data.get('liquidity_min'):
+                        liquidity_min = float(data.get('liquidity_min'))
                 except (json.JSONDecodeError, ValueError):
                     pass
 
-            results = sync_service.sync_all(
+            results = sync_service.sync_all_events(
                 kalshi_tag_slugs=kalshi_tag_slugs,
                 polymarket_tag_ids=polymarket_tag_ids,
                 close_after=close_after,
-                close_before=close_before
+                close_before=close_before,
+                volume_min=volume_min,
+                liquidity_min=liquidity_min
             )
 
             return JsonResponse({
                 'success': True,
                 'kalshi_synced': len(results['kalshi']),
                 'polymarket_synced': len(results['polymarket']),
+            })
+
+        except Exception as e:
+            return JsonResponse({
+                'success': False,
+                'error': str(e)
+            }, status=500)
+
+    return JsonResponse({'error': 'POST required'}, status=405)
+
+
+@csrf_exempt
+def get_events(request):
+    """Get events from database with optional search"""
+    if request.method == 'GET':
+        try:
+            exchange = request.GET.get('exchange')
+            search = request.GET.get('search', '').strip()
+            limit = int(request.GET.get('limit', 100))
+
+            events_qs = Event.objects.filter(is_active=True)
+
+            if exchange:
+                events_qs = events_qs.filter(exchange=exchange)
+
+            if search:
+                events_qs = events_qs.filter(
+                    Q(title__icontains=search) | Q(description__icontains=search)
+                )
+
+            events_qs = events_qs.order_by('-updated_at')[:limit]
+
+            events_list = [
+                {
+                    'id': e.id,
+                    'exchange': e.exchange,
+                    'external_id': e.external_id,
+                    'title': e.title,
+                    'url': e.url,
+                    'volume': e.volume,
+                    'liquidity': e.liquidity,
+                    'category': e.category,
+                    'end_date': e.end_date.isoformat() if e.end_date else None,
+                }
+                for e in events_qs
+            ]
+
+            return JsonResponse({
+                'success': True,
+                'events': events_list
+            })
+
+        except Exception as e:
+            return JsonResponse({
+                'success': False,
+                'error': str(e)
+            }, status=500)
+
+    return JsonResponse({'error': 'GET required'}, status=405)
+
+
+@csrf_exempt
+def create_event_match(request):
+    """Create a manual event match between a Kalshi event and a Polymarket event"""
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            kalshi_event_id = data.get('kalshi_event_id')
+            polymarket_event_id = data.get('polymarket_event_id')
+
+            if not kalshi_event_id or not polymarket_event_id:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Both kalshi_event_id and polymarket_event_id are required'
+                }, status=400)
+
+            # Get the events
+            try:
+                kalshi_event = Event.objects.get(id=kalshi_event_id, exchange=Exchange.KALSHI)
+            except Event.DoesNotExist:
+                return JsonResponse({
+                    'success': False,
+                    'error': f'Kalshi event with id {kalshi_event_id} not found'
+                }, status=404)
+
+            try:
+                polymarket_event = Event.objects.get(id=polymarket_event_id, exchange=Exchange.POLYMARKET)
+            except Event.DoesNotExist:
+                return JsonResponse({
+                    'success': False,
+                    'error': f'Polymarket event with id {polymarket_event_id} not found'
+                }, status=404)
+
+            # Create or update the event match
+            event_match, created = EventMatch.objects.update_or_create(
+                kalshi_event=kalshi_event,
+                polymarket_event=polymarket_event,
+                defaults={
+                    'similarity_score': 1.0,
+                    'match_reason': "Manual match",
+                }
+            )
+
+            return JsonResponse({
+                'success': True,
+                'created': created,
+                'event_match': {
+                    'id': event_match.id,
+                    'kalshi_event': {
+                        'id': kalshi_event.id,
+                        'title': kalshi_event.title,
+                        'url': kalshi_event.url,
+                    },
+                    'polymarket_event': {
+                        'id': polymarket_event.id,
+                        'title': polymarket_event.title,
+                        'url': polymarket_event.url,
+                    },
+                    'similarity_score': event_match.similarity_score,
+                    'match_reason': event_match.match_reason,
+                }
+            })
+
+        except json.JSONDecodeError:
+            return JsonResponse({
+                'success': False,
+                'error': 'Invalid JSON in request body'
+            }, status=400)
+        except Exception as e:
+            return JsonResponse({
+                'success': False,
+                'error': str(e)
+            }, status=500)
+
+    return JsonResponse({'error': 'POST required'}, status=405)
+
+
+@csrf_exempt
+def delete_event_match(request, match_id):
+    """Delete an event match"""
+    if request.method == 'DELETE' or request.method == 'POST':
+        try:
+            event_match = get_object_or_404(EventMatch, id=match_id)
+            event_match.delete()
+
+            return JsonResponse({
+                'success': True,
+                'message': f'Event match {match_id} deleted'
+            })
+
+        except Exception as e:
+            return JsonResponse({
+                'success': False,
+                'error': str(e)
+            }, status=500)
+
+    return JsonResponse({'error': 'DELETE or POST required'}, status=405)
+
+
+@csrf_exempt
+def verify_event_match(request, match_id):
+    """Verify/unverify an event match"""
+    if request.method == 'POST':
+        match = get_object_or_404(EventMatch, id=match_id)
+
+        # Toggle verification
+        match.is_verified = not match.is_verified
+        if match.is_verified:
+            match.verified_at = timezone.now()
+        else:
+            match.verified_at = None
+        match.save()
+
+        return JsonResponse({
+            'success': True,
+            'is_verified': match.is_verified,
+            'verified_at': match.verified_at.isoformat() if match.verified_at else None
+        })
+
+    return JsonResponse({'error': 'POST required'}, status=405)
+
+
+@csrf_exempt
+def refresh_event_matches(request):
+    """Semantically match events based on criteria filters"""
+    if request.method == 'POST':
+        try:
+            # Parse request body for filters
+            volume_min = None
+            liquidity_min = None
+
+            if request.body:
+                try:
+                    data = json.loads(request.body)
+                    if data.get('volume_min'):
+                        volume_min = float(data.get('volume_min'))
+                    if data.get('liquidity_min'):
+                        liquidity_min = float(data.get('liquidity_min'))
+                except (json.JSONDecodeError, ValueError):
+                    pass
+
+            # Get events filtered by criteria
+            kalshi_events_qs = Event.objects.filter(
+                exchange=Exchange.KALSHI, is_active=True
+            )
+            poly_events_qs = Event.objects.filter(
+                exchange=Exchange.POLYMARKET, is_active=True
+            )
+
+            if volume_min is not None:
+                kalshi_events_qs = kalshi_events_qs.filter(volume__gte=volume_min)
+                poly_events_qs = poly_events_qs.filter(volume__gte=volume_min)
+
+            if liquidity_min is not None:
+                kalshi_events_qs = kalshi_events_qs.filter(liquidity__gte=liquidity_min)
+                poly_events_qs = poly_events_qs.filter(liquidity__gte=liquidity_min)
+
+            kalshi_events = list(kalshi_events_qs)
+            poly_events = list(poly_events_qs)
+
+            # Run matching
+            matcher = EventMatcher()
+            matches = matcher.find_matches(kalshi_events, poly_events)
+            matcher.create_match_records(matches)
+
+            return JsonResponse({
+                'success': True,
+                'matches_found': len(matches),
+                'kalshi_events_searched': len(kalshi_events),
+                'polymarket_events_searched': len(poly_events),
             })
 
         except Exception as e:
@@ -301,9 +489,9 @@ def get_tags(request):
 
 @csrf_exempt
 def refresh_tags(request):
-    """Refresh tags from exchange APIs, save to database, and find tag matches"""
+    """Refresh tags from exchange APIs and save to database"""
     if request.method == 'POST':
-        sync_service = MarketSyncService()
+        sync_service = EventSyncService()
 
         try:
             results = sync_service.sync_all_tags(auto_match=True)
@@ -522,7 +710,7 @@ def create_tag(request):
                     'success': False,
                     'error': f'Tag "{label}" already exists for {exchange}'
                 }, status=400)
-                
+
             tag = Tag.objects.create(
                 exchange=exchange,
                 label=label,
@@ -579,91 +767,3 @@ def delete_tag(request, tag_id):
             }, status=500)
 
     return JsonResponse({'error': 'DELETE or POST required'}, status=405)
-
-
-@csrf_exempt
-def verify_match(request, match_id):
-    """Verify/unverify a market match"""
-    if request.method == 'POST':
-        match = get_object_or_404(MarketMatch, id=match_id)
-
-        # Toggle verification
-        match.is_verified = not match.is_verified
-        if match.is_verified:
-            match.verified_at = timezone.now()
-        else:
-            match.verified_at = None
-        match.save()
-
-        return JsonResponse({
-            'success': True,
-            'is_verified': match.is_verified,
-            'verified_at': match.verified_at.isoformat() if match.verified_at else None
-        })
-
-    return JsonResponse({'error': 'POST required'}, status=405)
-
-
-@csrf_exempt
-def refresh_arbitrage(request):
-    """Refresh matching and arbitrage detection, filtered by selected tags"""
-    if request.method == 'POST':
-        try:
-            # Parse request body for tag filters
-            kalshi_tag_slugs = []
-            polymarket_tag_ids = []
-
-            if request.body:
-                try:
-                    data = json.loads(request.body)
-                    kalshi_tag_slugs = data.get('kalshi_tags', [])
-                    poly_tags = data.get('polymarket_tags', [])
-                    if poly_tags:
-                        polymarket_tag_ids = [str(t) for t in poly_tags]
-                except (json.JSONDecodeError, ValueError):
-                    pass
-
-            # Filter markets by tags if specified
-            kalshi_markets_qs = Market.objects.filter(
-                exchange=Exchange.KALSHI, is_active=True
-            )
-            poly_markets_qs = Market.objects.filter(
-                exchange=Exchange.POLYMARKET, is_active=True
-            )
-
-            if kalshi_tag_slugs:
-                kalshi_markets_qs = kalshi_markets_qs.filter(
-                    tags__slug__in=kalshi_tag_slugs
-                ).distinct()
-
-            if polymarket_tag_ids:
-                poly_markets_qs = poly_markets_qs.filter(
-                    tags__external_id__in=polymarket_tag_ids
-                ).distinct()
-
-            kalshi_markets = list(kalshi_markets_qs)
-            poly_markets = list(poly_markets_qs)
-
-            # Run matching
-            matcher = MarketMatcher()
-            matches = matcher.find_matches(kalshi_markets, poly_markets)
-            matcher.create_match_records(matches)
-
-            # Detect arbitrage
-            detector = ArbitrageDetector()
-            opportunities = detector.find_all_opportunities()
-            detector.save_opportunities(opportunities)
-
-            return JsonResponse({
-                'success': True,
-                'matches_found': len(matches),
-                'opportunities_found': len(opportunities)
-            })
-
-        except Exception as e:
-            return JsonResponse({
-                'success': False,
-                'error': str(e)
-            }, status=500)
-
-    return JsonResponse({'error': 'POST required'}, status=405)

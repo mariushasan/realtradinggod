@@ -121,27 +121,53 @@ class PolymarketClient:
         if end_date_max is not None:
             params['end_date_max'] = end_date_max
 
-        print(params)
-        
         return self._gamma_request('/markets', params)
 
     def get_market(self, condition_id: str) -> dict:
         """Get single market by condition ID from Gamma API"""
         return self._gamma_request(f'/markets/{condition_id}')
 
-    def get_events(self, offset: int = 0, limit: int = 100, active: bool = True) -> list:
-        """Get events from Gamma API"""
+    def get_events(
+        self,
+        offset: int = 0,
+        limit: int = 100,
+        active: bool = True,
+        closed: bool = False,
+        tag_id: int = None,
+        tag_slug: str = None,
+        end_date_min: str = None,
+        end_date_max: str = None,
+        volume_min: float = None,
+        liquidity_min: float = None,
+        order: str = None
+    ) -> list:
+        """Get events from Gamma API with optional filtering"""
         params = {
             'limit': limit,
             'offset': offset,
             'active': str(active).lower(),
-            'closed': 'false'
+            'closed': str(closed).lower()
         }
+        if tag_id is not None:
+            params['tag_id'] = tag_id
+        if tag_slug is not None:
+            params['tag_slug'] = tag_slug
+        if end_date_min is not None:
+            params['end_date_min'] = end_date_min
+        if end_date_max is not None:
+            params['end_date_max'] = end_date_max
+        if volume_min is not None:
+            params['volume_min'] = volume_min
+        if liquidity_min is not None:
+            params['liquidity_min'] = liquidity_min
+        if order is not None:
+            params['order'] = order
+
         return self._gamma_request('/events', params)
 
-    def get_event(self, event_slug: str) -> dict:
-        """Get single event by slug from Gamma API"""
-        return self._gamma_request(f'/events/{event_slug}')
+    def get_event(self, event_id: str) -> dict:
+        """Get single event by ID or slug from Gamma API"""
+        return self._gamma_request(f'/events/{event_id}')
 
     def get_prices(self, token_ids: list) -> dict:
         """Get current prices for tokens from CLOB API"""
@@ -210,15 +236,33 @@ class PolymarketClient:
 
         return all_markets
 
-    def get_all_active_events(self) -> list:
-        """Fetch all active events with offset-based pagination"""
+    def get_all_active_events(
+        self,
+        tag_id: int = None,
+        tag_slug: str = None,
+        end_date_min: str = None,
+        end_date_max: str = None,
+        volume_min: float = None,
+        liquidity_min: float = None
+    ) -> list:
+        """Fetch all active events with offset-based pagination and optional filtering"""
         all_events = []
         offset = 0
         limit = 100
 
         while True:
             try:
-                response = self.get_events(offset=offset, limit=limit, active=True)
+                response = self.get_events(
+                    offset=offset,
+                    limit=limit,
+                    active=True,
+                    tag_id=tag_id,
+                    tag_slug=tag_slug,
+                    end_date_min=end_date_min,
+                    end_date_max=end_date_max,
+                    volume_min=volume_min,
+                    liquidity_min=liquidity_min
+                )
             except Exception as e:
                 logger.error(f"Failed to fetch events at offset {offset}: {e}")
                 break
@@ -236,6 +280,7 @@ class PolymarketClient:
                 break
 
             all_events.extend(events)
+            logger.info(f"Fetched {len(events)} Polymarket events (total: {len(all_events)})")
 
             if len(events) < limit:
                 break
