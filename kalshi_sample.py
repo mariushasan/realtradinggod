@@ -1,14 +1,4 @@
 #!/usr/bin/env python3
-"""
-Standalone Kalshi API Sample Script
-
-This script demonstrates:
-1. Querying market data for today's NYC weather
-2. Querying the orderbook for that market
-3. Placing and canceling an order of 1 unit
-
-API keys are loaded from environment variables (same as the main application).
-"""
 
 import os
 import sys
@@ -19,19 +9,15 @@ import json
 import requests
 from pathlib import Path
 
-# Load environment variables from .env file
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent / '.env')
 
-# Cryptography imports for RSA signing
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import padding
 
 
 class KalshiClient:
-    """Standalone Kalshi API Client"""
-
     HOST = 'https://api.elections.kalshi.com'
     API_PATH = '/trade-api/v2'
     BASE_URL = HOST + API_PATH
@@ -45,8 +31,7 @@ class KalshiClient:
         self.private_key = None
         if private_key_str and len(private_key_str) > 100:
             try:
-                private_key_str = private_key_str.strip('"\'')
-                private_key_str = private_key_str.replace('\\n', '\n')
+                private_key_str = private_key_str.strip('"\'').replace('\\n', '\n')
                 self.private_key = serialization.load_pem_private_key(
                     private_key_str.encode('utf-8'),
                     password=None,
@@ -64,7 +49,6 @@ class KalshiClient:
             print("✗ No API Key ID found in environment")
 
     def _create_signature(self, timestamp: str, method: str, path: str, debug: bool = False) -> str:
-        """Create RSA-PSS signature for request"""
         if not self.private_key:
             return ''
 
@@ -86,11 +70,9 @@ class KalshiClient:
         return base64.b64encode(signature).decode('utf-8')
 
     def _get_headers(self, method: str, path: str, debug: bool = False) -> dict:
-        """Get headers for request (authenticated if possible)"""
         headers = {'Content-Type': 'application/json'}
 
         if self.private_key and self.api_key_id:
-            # Use time.time() for millisecond timestamp (matching official SDK)
             timestamp = str(int(time.time() * 1000))
             signature = self._create_signature(timestamp, method, path, debug=debug)
             headers.update({
@@ -102,16 +84,11 @@ class KalshiClient:
         return headers
 
     def _request(self, method: str, path: str, params: dict = None, body: dict = None, debug: bool = False) -> dict:
-        """Make request to Kalshi API with retry logic"""
-        # Full path for signing includes API_PATH prefix
         full_path = self.API_PATH + path
         url = self.HOST + full_path
 
         if params:
-            query_parts = []
-            for k, v in params.items():
-                if v is not None:
-                    query_parts.append(f"{k}={v}")
+            query_parts = [f"{k}={v}" for k, v in params.items() if v is not None]
             if query_parts:
                 full_path = full_path + '?' + '&'.join(query_parts)
                 url = self.HOST + full_path
@@ -120,7 +97,6 @@ class KalshiClient:
             print(f"  [DEBUG] URL: {url}")
             print(f"  [DEBUG] Full path for signing: {full_path}")
 
-        # Sign the full path (including /trade-api/v2 prefix)
         headers = self._get_headers(method, full_path, debug=debug)
 
         last_error = None
@@ -140,11 +116,8 @@ class KalshiClient:
 
         raise last_error
 
-    # ========== Market Data Methods ==========
-
     def get_markets(self, status: str = 'open', limit: int = 200, cursor: str = None,
                     event_ticker: str = None, series_ticker: str = None) -> dict:
-        """Get markets from Kalshi"""
         params = {
             'status': status,
             'limit': limit,
@@ -155,11 +128,9 @@ class KalshiClient:
         return self._request('GET', '/markets', params)
 
     def get_market(self, ticker: str) -> dict:
-        """Get single market by ticker"""
         return self._request('GET', f'/markets/{ticker}')
 
     def search_markets(self, query: str) -> list:
-        """Search for markets by query string"""
         all_markets = []
         cursor = None
 
@@ -167,7 +138,6 @@ class KalshiClient:
             response = self.get_markets(status='open', cursor=cursor)
             markets = response.get('markets', [])
 
-            # Filter by query
             for market in markets:
                 title = market.get('title', '').lower()
                 ticker = market.get('ticker', '').lower()
@@ -180,43 +150,13 @@ class KalshiClient:
 
         return all_markets
 
-    # ========== Orderbook Methods ==========
-
     def get_orderbook(self, ticker: str, depth: int = 10) -> dict:
-        """
-        Get the orderbook for a market.
-
-        Args:
-            ticker: Market ticker
-            depth: Depth of orderbook (0 = all levels, 1-100 for specific depth)
-
-        Returns:
-            Orderbook with 'yes' and 'no' arrays of [price, quantity] levels
-        """
         params = {'depth': depth} if depth > 0 else None
         return self._request('GET', f'/markets/{ticker}/orderbook', params)
-
-    # ========== Order Methods ==========
 
     def create_order(self, ticker: str, side: str, action: str, count: int,
                      order_type: str = 'limit', yes_price: int = None, no_price: int = None,
                      debug: bool = False) -> dict:
-        """
-        Create an order on a market.
-
-        Args:
-            ticker: Market ticker
-            side: 'yes' or 'no'
-            action: 'buy' or 'sell'
-            count: Number of contracts (minimum 1)
-            order_type: 'limit' or 'market'
-            yes_price: Price in cents (1-99) for yes side
-            no_price: Price in cents (1-99) for no side
-            debug: Print debug info for signature
-
-        Returns:
-            Order response with order details
-        """
         body = {
             'ticker': ticker,
             'side': side,
@@ -233,50 +173,27 @@ class KalshiClient:
         return self._request('POST', '/portfolio/orders', body=body, debug=debug)
 
     def cancel_order(self, order_id: str) -> dict:
-        """
-        Cancel an existing order.
-
-        Args:
-            order_id: The order ID to cancel
-
-        Returns:
-            Cancel response with order details and reduced_by count
-        """
         return self._request('DELETE', f'/portfolio/orders/{order_id}')
 
     def get_orders(self, status: str = None) -> dict:
-        """
-        Get user's orders.
-
-        Args:
-            status: Filter by status ('resting', 'canceled', 'executed')
-
-        Returns:
-            List of orders
-        """
         params = {'status': status} if status else None
         return self._request('GET', '/portfolio/orders', params)
 
 
 def find_nyc_weather_market(client: KalshiClient) -> dict:
-    """Find a market for today's NYC weather"""
     print("\n" + "="*60)
     print("STEP 1: Finding NYC Weather Market")
     print("="*60)
 
-    # Get today's date for filtering
     today = datetime.date.today()
     print(f"Looking for NYC weather markets for {today}...")
 
-    # Search for NYC weather markets
-    # Common series tickers: HIGHNY (NYC high temp), KXNYC (NYC weather)
-    search_terms = ['HIGHNY', 'KXNYC', 'NYC', 'New York']
-
+    search_terms = ['KXRAINNYC', 'HIGHNY', 'KXNYC', 'NYC', 'New York']
     found_markets = []
+
     for term in search_terms:
         print(f"  Searching for '{term}'...")
         try:
-            # Try series ticker first
             response = client.get_markets(status='open', series_ticker=term)
             markets = response.get('markets', [])
             if markets:
@@ -286,7 +203,6 @@ def find_nyc_weather_market(client: KalshiClient) -> dict:
             print(f"    Series search failed: {e}")
 
     if not found_markets:
-        # Fallback: search through all markets
         print("  Falling back to full market search...")
         markets = client.search_markets('NYC')
         markets.extend(client.search_markets('New York'))
@@ -294,10 +210,9 @@ def find_nyc_weather_market(client: KalshiClient) -> dict:
                         or 'temp' in m.get('title', '').lower()
                         or 'high' in m.get('title', '').lower()]
 
-    # Filter for today's markets
+    # filter for today
     today_markets = []
     for market in found_markets:
-        # Check if market closes today or is about today
         close_time_str = market.get('close_time', '')
         if close_time_str:
             try:
@@ -323,7 +238,6 @@ def find_nyc_weather_market(client: KalshiClient) -> dict:
 
 
 def display_orderbook(client: KalshiClient, ticker: str):
-    """Display the orderbook for a market"""
     print("\n" + "="*60)
     print(f"STEP 2: Getting Orderbook for {ticker}")
     print("="*60)
@@ -364,14 +278,11 @@ def display_orderbook(client: KalshiClient, ticker: str):
 
 
 def place_and_cancel_order(client: KalshiClient, ticker: str, orderbook: dict):
-    """Place a limit order and then cancel it"""
     print("\n" + "="*60)
     print(f"STEP 3: Placing and Canceling Order on {ticker}")
     print("="*60)
 
-    # Determine a safe price from the orderbook (far from market to avoid execution)
-    # Use a very low price for a YES buy order so it won't execute
-    yes_price = 1  # 1 cent - very unlikely to execute
+    yes_price = 1  # 1 cent so it wont execute
 
     print(f"\nPlacing limit order:")
     print(f"  Side: YES")
@@ -380,7 +291,6 @@ def place_and_cancel_order(client: KalshiClient, ticker: str, orderbook: dict):
     print(f"  Price: {yes_price}¢")
 
     try:
-        # Place the order (with debug enabled to see signature details)
         order_response = client.create_order(
             ticker=ticker,
             side='yes',
@@ -399,11 +309,9 @@ def place_and_cancel_order(client: KalshiClient, ticker: str, orderbook: dict):
         print(f"  Status: {order.get('status')}")
         print(f"  Remaining: {order.get('remaining_count')} contracts")
 
-        # Wait a moment
         print("\nWaiting 2 seconds before canceling...")
         time.sleep(2)
 
-        # Cancel the order
         print(f"\nCanceling order {order_id}...")
         cancel_response = client.cancel_order(order_id)
 
@@ -437,7 +345,6 @@ def main():
     print("="*60)
     print(f"Date: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-    # Initialize client
     print("\nInitializing Kalshi client...")
     client = KalshiClient()
 
@@ -451,13 +358,11 @@ def main():
         print("\nYou can get these from: https://kalshi.com/settings/api")
         sys.exit(1)
 
-    # Step 1: Find NYC weather market
     market = find_nyc_weather_market(client)
 
     if not market:
         print("\nCould not find a suitable NYC weather market.")
         print("Attempting to use a sample market for demonstration...")
-        # Try to get any open market as fallback
         try:
             response = client.get_markets(status='open', limit=1)
             markets = response.get('markets', [])
@@ -473,10 +378,8 @@ def main():
     print(f"Title: {market.get('title')}")
     print(f"Status: {market.get('status')}")
 
-    # Step 2: Get orderbook
     orderbook = display_orderbook(client, ticker)
 
-    # Step 3: Place and cancel order
     if orderbook:
         success = place_and_cancel_order(client, ticker, orderbook)
 
