@@ -169,3 +169,53 @@ class KalshiClient:
     def get_tags_by_categories(self) -> dict:
         """Get all tags organized by categories"""
         return self._request('GET', '/search/tags_by_categories')
+
+    def get_series(self, category: str = None, tags: str = None) -> dict:
+        """Get series list, optionally filtered by category or tags"""
+        params = {}
+        if category:
+            params['category'] = category
+        if tags:
+            params['tags'] = tags
+        return self._request('GET', '/series', params if params else None)
+
+    def get_all_series_for_categories(self, categories: list) -> list:
+        """Get all series for a list of categories"""
+        all_series = []
+        seen_tickers = set()
+
+        for category in categories:
+            try:
+                response = self.get_series(category=category)
+                series_list = response.get('series', [])
+                for series in series_list:
+                    ticker = series.get('ticker', '')
+                    if ticker and ticker not in seen_tickers:
+                        all_series.append(series)
+                        seen_tickers.add(ticker)
+            except Exception as e:
+                logger.warning(f"Failed to fetch series for category {category}: {e}")
+
+        return all_series
+
+    def get_markets_by_series(self, series_ticker: str, status: str = 'open') -> list:
+        """Get all markets for a specific series"""
+        all_markets = []
+        cursor = None
+
+        while True:
+            params = {
+                'series_ticker': series_ticker,
+                'status': status,
+                'limit': 200,
+                'cursor': cursor
+            }
+            response = self._request('GET', '/markets', params)
+            markets = response.get('markets', [])
+            all_markets.extend(markets)
+
+            cursor = response.get('cursor')
+            if not cursor or not markets:
+                break
+
+        return all_markets
