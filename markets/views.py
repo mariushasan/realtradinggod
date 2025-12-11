@@ -9,8 +9,8 @@ from django.utils import timezone
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 from django.db.models import Q
 
-from .models import Market, Event, EventMatch, MarketMatch, ArbitrageOpportunity, Exchange, Tag, TagMatch
-from .services import EventMatcher, EventSyncService
+from .models import Market, Event, EventMatch, MarketMatch, ArbitrageOpportunity, Exchange, Tag, TagMatch, SportsEvent, SportsEventMatch
+from .services import EventMatcher, EventSyncService, SportsEventMatcher
 from .api import PolymarketClient
 
 
@@ -400,6 +400,7 @@ def refresh_event_matches(request):
             # Parse request body for filters
             volume_min = None
             liquidity_min = None
+            include_sports = True  # Default to including sports
 
             if request.body:
                 try:
@@ -408,6 +409,8 @@ def refresh_event_matches(request):
                         volume_min = float(data.get('volume_min'))
                     if data.get('liquidity_min'):
                         liquidity_min = float(data.get('liquidity_min'))
+                    if 'include_sports' in data:
+                        include_sports = data.get('include_sports', True)
                 except (json.JSONDecodeError, ValueError):
                     pass
 
@@ -427,19 +430,61 @@ def refresh_event_matches(request):
                 kalshi_events_qs = kalshi_events_qs.filter(liquidity__gte=liquidity_min)
                 poly_events_qs = poly_events_qs.filter(liquidity__gte=liquidity_min)
 
-            kalshi_events = list(kalshi_events_qs)
-            poly_events = list(poly_events_qs)
+            # Separate sports events from non-sports events
+            kalshi_sports_ids = set(
+                SportsEvent.objects.filter(event__exchange=Exchange.KALSHI).values_list('event_id', flat=True)
+            )
+            poly_sports_ids = set(
+                SportsEvent.objects.filter(event__exchange=Exchange.POLYMARKET).values_list('event_id', flat=True)
+            )
 
-            # Run matching
+            # Non-sports events for regular EventMatcher
+            kalshi_nonsports = [e for e in kalshi_events_qs if e.id not in kalshi_sports_ids]
+            poly_nonsports = [e for e in poly_events_qs if e.id not in poly_sports_ids]
+
+            # Run regular EventMatcher for non-sports events
             matcher = EventMatcher()
-            matches = matcher.find_matches(kalshi_events, poly_events)
-            matcher.create_match_records(matches)
+            regular_matches = matcher.find_matches(kalshi_nonsports, poly_nonsports)
+            matcher.create_match_records(regular_matches)
+
+            # Sports matching
+            sports_matches_count = 0
+            if include_sports:
+                # Get SportsEvents
+                kalshi_sports_qs = SportsEvent.objects.filter(
+                    event__exchange=Exchange.KALSHI,
+                    event__is_active=True
+                )
+                poly_sports_qs = SportsEvent.objects.filter(
+                    event__exchange=Exchange.POLYMARKET,
+                    event__is_active=True
+                )
+
+                if volume_min is not None:
+                    kalshi_sports_qs = kalshi_sports_qs.filter(event__volume__gte=volume_min)
+                    poly_sports_qs = poly_sports_qs.filter(event__volume__gte=volume_min)
+
+                if liquidity_min is not None:
+                    kalshi_sports_qs = kalshi_sports_qs.filter(event__liquidity__gte=liquidity_min)
+                    poly_sports_qs = poly_sports_qs.filter(event__liquidity__gte=liquidity_min)
+
+                kalshi_sports = list(kalshi_sports_qs)
+                poly_sports = list(poly_sports_qs)
+
+                # Run SportsEventMatcher
+                sports_matcher = SportsEventMatcher()
+                sports_matches = sports_matcher.find_matches(kalshi_sports, poly_sports)
+                sports_matcher.create_match_records(sports_matches)
+                sports_matches_count = len(sports_matches)
 
             return JsonResponse({
                 'success': True,
-                'matches_found': len(matches),
-                'kalshi_events_searched': len(kalshi_events),
-                'polymarket_events_searched': len(poly_events),
+                'matches_found': len(regular_matches),
+                'sports_matches_found': sports_matches_count,
+                'kalshi_events_searched': len(kalshi_nonsports),
+                'polymarket_events_searched': len(poly_nonsports),
+                'kalshi_sports_searched': len(kalshi_sports_ids) if include_sports else 0,
+                'polymarket_sports_searched': len(poly_sports_ids) if include_sports else 0,
             })
 
         except Exception as e:

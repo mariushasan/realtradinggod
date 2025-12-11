@@ -80,6 +80,12 @@ class Event(models.Model):
     # URL for linking to the event
     url = models.URLField(max_length=500, blank=True)
 
+    # Tags associated with this event (for filtering and sports detection)
+    tags = models.ManyToManyField('Tag', related_name='events', blank=True)
+
+    # Raw API data for sports matching (stored as JSON)
+    raw_data = models.JSONField(default=dict, blank=True)
+
     # Trading metrics (aggregated from markets)
     volume = models.FloatField(default=0.0)
     volume_24h = models.FloatField(default=0.0)
@@ -101,6 +107,17 @@ class Event(models.Model):
 
     def __str__(self):
         return f"[{self.exchange}] {self.title}"
+
+    def has_sports_tag(self) -> bool:
+        """Check if this event has any sports-related tags"""
+        return self.tags.filter(
+            models.Q(category__icontains='sports') |
+            models.Q(label__icontains='sports') |
+            models.Q(label__icontains='nfl') |
+            models.Q(label__icontains='nba') |
+            models.Q(label__icontains='mlb') |
+            models.Q(label__icontains='nhl')
+        ).exists()
 
 
 class Market(models.Model):
@@ -220,6 +237,135 @@ class MarketMatch(models.Model):
 
     def __str__(self):
         return f"Match: {self.kalshi_market.title[:30]} <-> {self.polymarket_market.title[:30]}"
+
+
+class SportsEvent(models.Model):
+    """Sports event with extracted fields for matching"""
+
+    class League(models.TextChoices):
+        NFL = 'nfl', 'NFL'
+        NBA = 'nba', 'NBA'
+        MLB = 'mlb', 'MLB'
+        NHL = 'nhl', 'NHL'
+        MLS = 'mls', 'MLS'
+        UFC = 'ufc', 'UFC'
+        NCAA_FB = 'ncaa_fb', 'NCAA Football'
+        NCAA_BB = 'ncaa_bb', 'NCAA Basketball'
+        OTHER = 'other', 'Other'
+
+    class MarketType(models.TextChoices):
+        WIN_TOTAL = 'win_total', 'Win Total (Over/Under)'
+        EXACT_WINS = 'exact_wins', 'Exact Win Total'
+        DIVISION_WINNER = 'division', 'Division Winner'
+        CONFERENCE_WINNER = 'conference', 'Conference Winner'
+        CHAMPION = 'champion', 'League Champion / Super Bowl'
+        PLAYOFF_WINNER = 'playoff', 'Playoff Game Winner'
+        MVP = 'mvp', 'MVP Award'
+        PLAYER_AWARD = 'player_award', 'Player Award'
+        PROP_BET = 'prop', 'Prop Bet'
+        OTHER = 'other', 'Other'
+
+    # Link to the base Event
+    event = models.OneToOneField(
+        Event,
+        on_delete=models.CASCADE,
+        related_name='sports_event',
+        primary_key=True
+    )
+
+    # Core identification
+    league = models.CharField(max_length=20, choices=League.choices, default=League.OTHER)
+    market_type = models.CharField(max_length=20, choices=MarketType.choices, default=MarketType.OTHER)
+
+    # Team info (extracted from ticker/title/images)
+    team_code = models.CharField(max_length=10, blank=True, help_text="Standard team abbreviation (e.g., CLE, LAR, TB)")
+    team_name = models.CharField(max_length=100, blank=True, help_text="Full team name or city (e.g., Cleveland, Tampa Bay)")
+    team_uuid = models.CharField(max_length=100, blank=True, help_text="Kalshi's internal team UUID")
+
+    # Player info (for MVP/awards markets)
+    player_name = models.CharField(max_length=200, blank=True, help_text="Player name for awards markets")
+
+    # Season/timing
+    season = models.CharField(max_length=20, blank=True, help_text="Season identifier (e.g., 2025-26, 2025)")
+    season_year = models.IntegerField(null=True, blank=True, help_text="Primary year of the season")
+
+    # Division/Conference
+    division = models.CharField(max_length=50, blank=True, help_text="Division name (e.g., NFC West)")
+    conference = models.CharField(max_length=20, blank=True, help_text="Conference (e.g., NFC, AFC, Eastern)")
+
+    # Numeric thresholds (for win totals)
+    threshold_value = models.FloatField(null=True, blank=True, help_text="Numeric threshold (e.g., 8.5 for over 8.5 wins)")
+    threshold_type = models.CharField(max_length=20, blank=True, help_text="Type of threshold (over, under, exactly)")
+
+    # Kalshi-specific fields
+    series_ticker = models.CharField(max_length=100, blank=True, help_text="Kalshi series ticker")
+    competition_scope = models.CharField(max_length=100, blank=True, help_text="Kalshi competition_scope")
+
+    # Polymarket-specific fields
+    group_item_title = models.CharField(max_length=200, blank=True, help_text="Polymarket groupItemTitle")
+    image_team_code = models.CharField(max_length=10, blank=True, help_text="Team code extracted from image URL")
+
+    # Matching helpers
+    normalized_title = models.CharField(max_length=500, blank=True, help_text="Normalized title for text matching")
+    keywords = models.JSONField(default=list, blank=True, help_text="Extracted keywords for matching")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        parts = [f"[{self.league}]"]
+        if self.team_code:
+            parts.append(self.team_code)
+        if self.market_type:
+            parts.append(f"({self.get_market_type_display()})")
+        parts.append(self.event.title[:50])
+        return ' '.join(parts)
+
+
+class SportsEventMatch(models.Model):
+    """Match between sports events from different exchanges"""
+    kalshi_sports_event = models.ForeignKey(
+        SportsEvent,
+        on_delete=models.CASCADE,
+        related_name='kalshi_sports_matches',
+        limit_choices_to={'event__exchange': Exchange.KALSHI}
+    )
+    polymarket_sports_event = models.ForeignKey(
+        SportsEvent,
+        on_delete=models.CASCADE,
+        related_name='polymarket_sports_matches',
+        limit_choices_to={'event__exchange': Exchange.POLYMARKET}
+    )
+
+    # Matching scores by method
+    similarity_score = models.FloatField(default=0.0)
+    team_code_match = models.BooleanField(default=False, help_text="Teams matched by code")
+    team_name_match = models.BooleanField(default=False, help_text="Teams matched by name")
+    league_match = models.BooleanField(default=False, help_text="Same league")
+    market_type_match = models.BooleanField(default=False, help_text="Same market type")
+    season_match = models.BooleanField(default=False, help_text="Same season")
+    threshold_match = models.BooleanField(default=False, help_text="Same threshold value")
+
+    # Match reason breakdown
+    match_reason = models.TextField(blank=True, help_text="Detailed explanation of why matched")
+    match_method = models.CharField(max_length=50, blank=True, help_text="Primary matching method used")
+
+    # Verification
+    is_verified = models.BooleanField(default=False)
+    verified_at = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ['kalshi_sports_event', 'polymarket_sports_event']
+        ordering = ['-similarity_score', '-updated_at']
+
+    def __str__(self):
+        return f"SportsMatch: {self.kalshi_sports_event.team_code or 'Kalshi'} <-> {self.polymarket_sports_event.team_code or 'Poly'}"
 
 
 class ArbitrageOpportunity(models.Model):

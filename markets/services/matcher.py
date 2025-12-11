@@ -5,7 +5,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 
-from markets.models import Event, EventMatch, Market, MarketMatch, Exchange, Tag, TagMatch
+from markets.models import Event, EventMatch, Market, MarketMatch, Exchange, Tag, TagMatch, SportsEvent, SportsEventMatch
 
 
 class EventMatcher:
@@ -344,6 +344,517 @@ class EventMatcher:
                 defaults={
                     'similarity_score': score,
                     'match_reason': reason
+                }
+            )
+            created_matches.append(match)
+
+        return created_matches
+
+
+class SportsEventMatcher:
+    """
+    Specialized matcher for sports events using structural and semantic matching.
+
+    Matching methods (in order of reliability):
+    1. Team code exact match (structural)
+    2. Team name fuzzy match
+    3. Division/conference match
+    4. Season + market type match
+    5. Player name match (for awards)
+    6. Threshold value match (for win totals)
+    7. Semantic title similarity (fallback)
+    """
+
+    SIMILARITY_THRESHOLD = 0.4  # Lower threshold since we have more signals
+
+    # NFL team code mappings (Kalshi code -> Standard code)
+    NFL_TEAM_CODE_MAP = {
+        # Kalshi uses various formats
+        'ARI': 'ARI', 'ARZ': 'ARI', 'ARIZONA': 'ARI',
+        'ATL': 'ATL', 'ATLANTA': 'ATL',
+        'BAL': 'BAL', 'BALTIMORE': 'BAL',
+        'BUF': 'BUF', 'BUFFALO': 'BUF',
+        'CAR': 'CAR', 'CAROLINA': 'CAR',
+        'CHI': 'CHI', 'CHICAGO': 'CHI',
+        'CIN': 'CIN', 'CINCINNATI': 'CIN',
+        'CLE': 'CLE', 'CLEVELAND': 'CLE',
+        'DAL': 'DAL', 'DALLAS': 'DAL',
+        'DEN': 'DEN', 'DENVER': 'DEN',
+        'DET': 'DET', 'DETROIT': 'DET',
+        'GB': 'GB', 'GNB': 'GB', 'GREEN BAY': 'GB', 'GREENBAY': 'GB',
+        'HOU': 'HOU', 'HOUSTON': 'HOU',
+        'IND': 'IND', 'INDIANAPOLIS': 'IND',
+        'JAC': 'JAC', 'JAX': 'JAC', 'JACKSONVILLE': 'JAC',
+        'KC': 'KC', 'KAN': 'KC', 'KANSAS CITY': 'KC',
+        'LA': 'LAR', 'LAR': 'LAR', 'LOS ANGELES R': 'LAR', 'RAMS': 'LAR',
+        'LAC': 'LAC', 'LOS ANGELES C': 'LAC', 'CHARGERS': 'LAC',
+        'LV': 'LV', 'LVR': 'LV', 'OAK': 'LV', 'RAIDERS': 'LV', 'LAS VEGAS': 'LV',
+        'MIA': 'MIA', 'MIAMI': 'MIA',
+        'MIN': 'MIN', 'MINNESOTA': 'MIN',
+        'NE': 'NE', 'NEW ENGLAND': 'NE', 'PATRIOTS': 'NE',
+        'NO': 'NO', 'NEW ORLEANS': 'NO', 'SAINTS': 'NO',
+        'NYG': 'NYG', 'NEW YORK G': 'NYG', 'GIANTS': 'NYG',
+        'NYJ': 'NYJ', 'NEW YORK J': 'NYJ', 'JETS': 'NYJ',
+        'PHI': 'PHI', 'PHILADELPHIA': 'PHI', 'EAGLES': 'PHI',
+        'PIT': 'PIT', 'PITTSBURGH': 'PIT', 'STEELERS': 'PIT',
+        'SEA': 'SEA', 'SEATTLE': 'SEA', 'SEAHAWKS': 'SEA',
+        'SF': 'SF', 'SAN FRANCISCO': 'SF', '49ERS': 'SF',
+        'TB': 'TB', 'TAMPA BAY': 'TB', 'BUCCANEERS': 'TB', 'BUCS': 'TB',
+        'TEN': 'TEN', 'TENNESSEE': 'TEN', 'TITANS': 'TEN',
+        'WAS': 'WAS', 'WSH': 'WAS', 'WASHINGTON': 'WAS', 'COMMANDERS': 'WAS',
+    }
+
+    # City to team code for Polymarket groupItemTitle matching
+    NFL_CITY_TO_CODE = {
+        'arizona': 'ARI', 'atlanta': 'ATL', 'baltimore': 'BAL', 'buffalo': 'BUF',
+        'carolina': 'CAR', 'chicago': 'CHI', 'cincinnati': 'CIN', 'cleveland': 'CLE',
+        'dallas': 'DAL', 'denver': 'DEN', 'detroit': 'DET', 'green bay': 'GB',
+        'houston': 'HOU', 'indianapolis': 'IND', 'jacksonville': 'JAC',
+        'kansas city': 'KC', 'los angeles r': 'LAR', 'los angeles c': 'LAC',
+        'las vegas': 'LV', 'miami': 'MIA', 'minnesota': 'MIN', 'new england': 'NE',
+        'new orleans': 'NO', 'new york g': 'NYG', 'new york j': 'NYJ',
+        'philadelphia': 'PHI', 'pittsburgh': 'PIT', 'seattle': 'SEA',
+        'san francisco': 'SF', 'tampa bay': 'TB', 'tennessee': 'TEN',
+        'washington': 'WAS',
+    }
+
+    # Division mapping
+    NFL_DIVISIONS = {
+        'NFC WEST': ['ARI', 'LAR', 'SF', 'SEA'],
+        'NFC EAST': ['DAL', 'NYG', 'PHI', 'WAS'],
+        'NFC NORTH': ['CHI', 'DET', 'GB', 'MIN'],
+        'NFC SOUTH': ['ATL', 'CAR', 'NO', 'TB'],
+        'AFC WEST': ['DEN', 'KC', 'LAC', 'LV'],
+        'AFC EAST': ['BUF', 'MIA', 'NE', 'NYJ'],
+        'AFC NORTH': ['BAL', 'CIN', 'CLE', 'PIT'],
+        'AFC SOUTH': ['HOU', 'IND', 'JAC', 'TEN'],
+    }
+
+    def __init__(self):
+        self.vectorizer = TfidfVectorizer(
+            lowercase=True,
+            stop_words='english',
+            ngram_range=(1, 2),
+            max_features=2000
+        )
+
+    @classmethod
+    def normalize_team_code(cls, code: str) -> str:
+        """Normalize team code to standard format"""
+        if not code:
+            return ''
+        code = code.upper().strip()
+        return cls.NFL_TEAM_CODE_MAP.get(code, code)
+
+    @classmethod
+    def extract_team_code_from_kalshi_ticker(cls, ticker: str) -> str:
+        """
+        Extract team code from Kalshi event/market ticker.
+        Examples:
+            KXNFLWINS-CLE-25B -> CLE
+            KXNFLNFCWEST-25-SF -> SF
+            KXNFLEXACTWINSCLE-25 -> CLE
+        """
+        if not ticker:
+            return ''
+
+        ticker = ticker.upper()
+
+        # Pattern 1: KXNFLWINS-CLE-25B (team code as segment)
+        parts = ticker.split('-')
+        for part in parts:
+            if part in cls.NFL_TEAM_CODE_MAP:
+                return cls.normalize_team_code(part)
+
+        # Pattern 2: KXNFLEXACTWINSCLE-25 (team code embedded at end)
+        # Look for team codes at the end of segments
+        for code in cls.NFL_TEAM_CODE_MAP.keys():
+            if len(code) >= 2 and ticker.endswith(code) or f'{code}-' in ticker:
+                return cls.normalize_team_code(code)
+
+        # Pattern 3: Check each segment for embedded team codes
+        for part in parts:
+            for code in cls.NFL_TEAM_CODE_MAP.keys():
+                if len(code) >= 2 and part.endswith(code):
+                    return cls.normalize_team_code(code)
+
+        return ''
+
+    @classmethod
+    def extract_team_code_from_polymarket_image(cls, image_url: str) -> str:
+        """
+        Extract team code from Polymarket image URL.
+        Example: https://...NFL+Team+Logos/ARZ.png -> ARI
+        """
+        if not image_url:
+            return ''
+
+        # Pattern: /TEAMCODE.png
+        match = re.search(r'/([A-Z]{2,3})\.png', image_url.upper())
+        if match:
+            return cls.normalize_team_code(match.group(1))
+
+        return ''
+
+    @classmethod
+    def extract_team_from_group_item_title(cls, title: str) -> str:
+        """
+        Extract team code from Polymarket groupItemTitle.
+        Example: "Tampa Bay" -> TB, "Arizona" -> ARI
+        """
+        if not title:
+            return ''
+
+        title_lower = title.lower().strip()
+        return cls.NFL_CITY_TO_CODE.get(title_lower, '')
+
+    @classmethod
+    def extract_season_from_ticker(cls, ticker: str) -> Tuple[str, int]:
+        """
+        Extract season info from ticker.
+        Returns (season_string, primary_year)
+        """
+        if not ticker:
+            return '', None
+
+        # Pattern: -25 or -25B (year suffix)
+        match = re.search(r'-(\d{2})[A-Z]?(?:-|$)', ticker)
+        if match:
+            year_suffix = match.group(1)
+            year = 2000 + int(year_suffix)
+            return f"{year}-{year+1}", year
+
+        return '', None
+
+    @classmethod
+    def extract_season_from_text(cls, text: str) -> Tuple[str, int]:
+        """Extract season from title/description text"""
+        if not text:
+            return '', None
+
+        # Pattern: 2025-26 or 2025/26
+        match = re.search(r'(20\d{2})[-/](\d{2})', text)
+        if match:
+            year = int(match.group(1))
+            return f"{year}-{year+1}", year
+
+        # Pattern: just 2025 or 2026
+        match = re.search(r'\b(20\d{2})\b', text)
+        if match:
+            year = int(match.group(1))
+            return str(year), year
+
+        return '', None
+
+    @classmethod
+    def detect_market_type(cls, raw_data: dict, title: str) -> str:
+        """Detect the type of sports market"""
+        title_lower = title.lower()
+
+        # Check Kalshi competition_scope first
+        scope = raw_data.get('product_metadata', {}).get('competition_scope', '').lower()
+
+        if 'win total' in scope or 'win totals' in scope:
+            return SportsEvent.MarketType.WIN_TOTAL
+        if 'exact win' in scope or 'exact wins' in scope:
+            return SportsEvent.MarketType.EXACT_WINS
+        if 'division' in scope:
+            return SportsEvent.MarketType.DIVISION_WINNER
+
+        # Check title for keywords
+        if 'mvp' in title_lower:
+            return SportsEvent.MarketType.MVP
+        if 'comeback' in title_lower or 'player of' in title_lower or 'award' in title_lower:
+            return SportsEvent.MarketType.PLAYER_AWARD
+        if 'champion' in title_lower:
+            if 'nfc' in title_lower or 'afc' in title_lower:
+                return SportsEvent.MarketType.CONFERENCE_WINNER
+            return SportsEvent.MarketType.CHAMPION
+        if 'division' in title_lower:
+            return SportsEvent.MarketType.DIVISION_WINNER
+        if 'win more than' in title_lower or 'over' in title_lower and 'win' in title_lower:
+            return SportsEvent.MarketType.WIN_TOTAL
+        if 'exactly' in title_lower and 'win' in title_lower:
+            return SportsEvent.MarketType.EXACT_WINS
+        if 'playoff' in title_lower or 'wild card' in title_lower:
+            return SportsEvent.MarketType.PLAYOFF_WINNER
+        if 'super bowl' in title_lower:
+            return SportsEvent.MarketType.CHAMPION
+
+        return SportsEvent.MarketType.OTHER
+
+    @classmethod
+    def detect_league(cls, raw_data: dict, title: str, category: str) -> str:
+        """Detect which league this event belongs to"""
+        text = f"{title} {category}".lower()
+        competition = raw_data.get('product_metadata', {}).get('competition', '').lower()
+
+        if 'pro football' in competition or 'nfl' in text or 'football' in text:
+            return SportsEvent.League.NFL
+        if 'basketball' in competition or 'nba' in text:
+            return SportsEvent.League.NBA
+        if 'baseball' in competition or 'mlb' in text:
+            return SportsEvent.League.MLB
+        if 'hockey' in competition or 'nhl' in text:
+            return SportsEvent.League.NHL
+        if 'mls' in text or 'soccer' in text:
+            return SportsEvent.League.MLS
+        if 'ufc' in text or 'mma' in text:
+            return SportsEvent.League.UFC
+
+        return SportsEvent.League.OTHER
+
+    @classmethod
+    def extract_division_from_text(cls, text: str) -> str:
+        """Extract division name from text"""
+        text_upper = text.upper()
+
+        for division in cls.NFL_DIVISIONS.keys():
+            if division.replace(' ', '') in text_upper.replace(' ', ''):
+                return division
+
+        return ''
+
+    @classmethod
+    def extract_threshold_from_kalshi(cls, raw_data: dict) -> Tuple[float, str]:
+        """
+        Extract threshold value from Kalshi market data.
+        Returns (threshold_value, threshold_type)
+        """
+        # Look at markets for floor_strike
+        markets = raw_data.get('markets', [])
+        if markets and isinstance(markets, list) and len(markets) > 0:
+            market = markets[0]
+            floor_strike = market.get('floor_strike')
+            if floor_strike is not None:
+                # floor_strike of 8 means "over 8.5 wins"
+                return float(floor_strike) + 0.5, 'over'
+            cap_strike = market.get('cap_strike')
+            if cap_strike is not None:
+                return float(cap_strike), 'exactly'
+
+        return None, ''
+
+    def compute_sports_match_score(
+        self,
+        kalshi_se: SportsEvent,
+        poly_se: SportsEvent
+    ) -> Tuple[float, Dict]:
+        """
+        Compute detailed match score between two SportsEvents.
+        Returns (score, breakdown_dict)
+        """
+        breakdown = {
+            'team_code_match': False,
+            'team_name_match': False,
+            'league_match': False,
+            'market_type_match': False,
+            'season_match': False,
+            'division_match': False,
+            'threshold_match': False,
+            'text_similarity': 0.0,
+        }
+
+        score = 0.0
+
+        # 1. Team code match (HIGHEST weight - 0.35)
+        if kalshi_se.team_code and poly_se.team_code:
+            if kalshi_se.team_code == poly_se.team_code:
+                score += 0.35
+                breakdown['team_code_match'] = True
+        elif kalshi_se.team_code and poly_se.image_team_code:
+            if kalshi_se.team_code == poly_se.image_team_code:
+                score += 0.35
+                breakdown['team_code_match'] = True
+
+        # 2. Team name fuzzy match (0.20)
+        if not breakdown['team_code_match'] and kalshi_se.team_name and poly_se.team_name:
+            k_name = kalshi_se.team_name.lower()
+            p_name = poly_se.team_name.lower()
+            if k_name == p_name or k_name in p_name or p_name in k_name:
+                score += 0.20
+                breakdown['team_name_match'] = True
+
+        # 3. League match (0.15)
+        if kalshi_se.league == poly_se.league and kalshi_se.league != SportsEvent.League.OTHER:
+            score += 0.15
+            breakdown['league_match'] = True
+
+        # 4. Market type match (0.10)
+        if kalshi_se.market_type == poly_se.market_type and kalshi_se.market_type != SportsEvent.MarketType.OTHER:
+            score += 0.10
+            breakdown['market_type_match'] = True
+
+        # 5. Season match (0.10)
+        if kalshi_se.season_year and poly_se.season_year:
+            if kalshi_se.season_year == poly_se.season_year:
+                score += 0.10
+                breakdown['season_match'] = True
+
+        # 6. Division match (0.05)
+        if kalshi_se.division and poly_se.division:
+            if kalshi_se.division.upper() == poly_se.division.upper():
+                score += 0.05
+                breakdown['division_match'] = True
+
+        # 7. Threshold match - for win totals (0.05)
+        if kalshi_se.threshold_value and poly_se.threshold_value:
+            if abs(kalshi_se.threshold_value - poly_se.threshold_value) < 0.1:
+                score += 0.05
+                breakdown['threshold_match'] = True
+
+        # 8. Text similarity fallback (up to 0.10)
+        try:
+            text1 = kalshi_se.normalized_title or kalshi_se.event.title
+            text2 = poly_se.normalized_title or poly_se.event.title
+            text1_norm = re.sub(r'[^a-z0-9\s]', ' ', text1.lower())
+            text2_norm = re.sub(r'[^a-z0-9\s]', ' ', text2.lower())
+            tfidf_matrix = self.vectorizer.fit_transform([text1_norm, text2_norm])
+            text_sim = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:2])[0][0]
+            score += 0.10 * text_sim
+            breakdown['text_similarity'] = text_sim
+        except Exception:
+            pass
+
+        breakdown['total_score'] = score
+        return score, breakdown
+
+    def generate_sports_match_reason(self, breakdown: Dict) -> str:
+        """Generate human-readable match reason from breakdown"""
+        reasons = []
+        methods = []
+
+        if breakdown.get('team_code_match'):
+            reasons.append("✓ Team codes match")
+            methods.append("TEAM_CODE")
+        if breakdown.get('team_name_match'):
+            reasons.append("✓ Team names match")
+            methods.append("TEAM_NAME")
+        if breakdown.get('league_match'):
+            reasons.append("✓ Same league")
+            methods.append("LEAGUE")
+        if breakdown.get('market_type_match'):
+            reasons.append("✓ Same market type")
+            methods.append("MARKET_TYPE")
+        if breakdown.get('season_match'):
+            reasons.append("✓ Same season")
+            methods.append("SEASON")
+        if breakdown.get('division_match'):
+            reasons.append("✓ Same division")
+            methods.append("DIVISION")
+        if breakdown.get('threshold_match'):
+            reasons.append("✓ Same threshold")
+            methods.append("THRESHOLD")
+
+        text_sim = breakdown.get('text_similarity', 0)
+        if text_sim > 0.5:
+            reasons.append(f"✓ Text similarity: {text_sim:.2f}")
+            methods.append("TEXT_SIM")
+
+        score = breakdown.get('total_score', 0)
+        if score >= 0.6:
+            reasons.append("【HIGH confidence】")
+        elif score >= 0.4:
+            reasons.append("【MEDIUM confidence】")
+        else:
+            reasons.append("【LOW confidence - verify】")
+
+        primary_method = methods[0] if methods else "UNKNOWN"
+        return " | ".join(reasons), primary_method
+
+    def _find_best_sports_match(
+        self,
+        kalshi_se: SportsEvent,
+        poly_sports_events: List[SportsEvent],
+        threshold: float
+    ) -> Tuple[SportsEvent, SportsEvent, float, str, str] | None:
+        """Find the best Polymarket sports event match for a Kalshi sports event"""
+        best_match = None
+        best_score = 0
+        best_breakdown = {}
+
+        for poly_se in poly_sports_events:
+            score, breakdown = self.compute_sports_match_score(kalshi_se, poly_se)
+
+            if score > best_score:
+                best_score = score
+                best_match = poly_se
+                best_breakdown = breakdown
+
+        if best_match and best_score >= threshold:
+            reason, method = self.generate_sports_match_reason(best_breakdown)
+            return (kalshi_se, best_match, best_score, reason, method)
+
+        return None
+
+    def find_matches(
+        self,
+        kalshi_sports_events: List[SportsEvent],
+        poly_sports_events: List[SportsEvent],
+        threshold: float = None,
+        max_workers: int = 8
+    ) -> List[Tuple[SportsEvent, SportsEvent, float, str, str]]:
+        """
+        Find matching sports events between Kalshi and Polymarket.
+        Returns list of tuples: (kalshi_se, poly_se, score, reason, method)
+        """
+        threshold = threshold or self.SIMILARITY_THRESHOLD
+        matches = []
+
+        if not kalshi_sports_events or not poly_sports_events:
+            return matches
+
+        # Process in parallel
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(
+                    self._find_best_sports_match,
+                    kalshi_se,
+                    poly_sports_events,
+                    threshold
+                ): kalshi_se
+                for kalshi_se in kalshi_sports_events
+            }
+
+            for future in as_completed(futures):
+                result = future.result()
+                if result:
+                    matches.append(result)
+
+        # Sort by score descending
+        matches.sort(key=lambda x: x[2], reverse=True)
+
+        return matches
+
+    def create_match_records(
+        self,
+        matches: List[Tuple[SportsEvent, SportsEvent, float, str, str]]
+    ) -> List[SportsEventMatch]:
+        """Create or update SportsEventMatch records from matches"""
+        created_matches = []
+
+        for kalshi_se, poly_se, score, reason, method in matches:
+            # Parse breakdown from reason
+            team_code_match = '✓ Team codes match' in reason
+            team_name_match = '✓ Team names match' in reason
+            league_match = '✓ Same league' in reason
+            market_type_match = '✓ Same market type' in reason
+            season_match = '✓ Same season' in reason
+            threshold_match = '✓ Same threshold' in reason
+
+            match, created = SportsEventMatch.objects.update_or_create(
+                kalshi_sports_event=kalshi_se,
+                polymarket_sports_event=poly_se,
+                defaults={
+                    'similarity_score': score,
+                    'match_reason': reason,
+                    'match_method': method,
+                    'team_code_match': team_code_match,
+                    'team_name_match': team_name_match,
+                    'league_match': league_match,
+                    'market_type_match': market_type_match,
+                    'season_match': season_match,
+                    'threshold_match': threshold_match,
                 }
             )
             created_matches.append(match)

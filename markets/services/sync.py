@@ -7,8 +7,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from django.utils import timezone
 
-from markets.models import Market, Event, Exchange, Tag, TagMatch
+from markets.models import Market, Event, Exchange, Tag, TagMatch, SportsEvent
 from markets.api import KalshiClient, PolymarketClient
+from markets.services.matcher import SportsEventMatcher
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ class EventSyncService:
 
     def _bulk_create_events(self, events: List[Event], exchange: Exchange) -> Dict[str, Event]:
         """Bulk create/update events and return a dict mapping external_id to Event"""
-        
+
         if not events:
             return {}
 
@@ -41,7 +42,7 @@ class EventSyncService:
             update_fields=[
                 'title', 'description', 'category', 'url',
                 'volume', 'volume_24h', 'liquidity', 'open_interest',
-                'is_active', 'mutually_exclusive', 'end_date'
+                'is_active', 'mutually_exclusive', 'end_date', 'raw_data'
             ]
         )
 
@@ -307,7 +308,7 @@ class EventSyncService:
             return False
         if liquidity_max is not None and total_liquidity > liquidity_max:
             return False
-        # Create Event object
+        # Create Event object with raw_data for sports matching
         events_batch.append(Event(
             exchange=Exchange.KALSHI,
             external_id=event_ticker,
@@ -321,7 +322,8 @@ class EventSyncService:
             open_interest=total_open_interest,
             is_active=True,
             mutually_exclusive=event_data.get('mutually_exclusive', False),
-            end_date=event_close_time
+            end_date=event_close_time,
+            raw_data=event_data  # Store full event data for sports matching
         ))
         # Store market data
         market_data_batch[event_ticker] = {
@@ -679,7 +681,7 @@ class EventSyncService:
             except Exception:
                 pass
 
-        # Create Event object
+        # Create Event object with raw_data for sports matching
         events_batch.append(Event(
             exchange=Exchange.POLYMARKET,
             external_id=external_id,
@@ -693,7 +695,8 @@ class EventSyncService:
             open_interest=float(event_data.get('openInterest', 0) or 0),
             is_active=event_data.get('active', True),
             mutually_exclusive=event_data.get('negRisk', False),
-            end_date=end_date
+            end_date=end_date,
+            raw_data=event_data  # Store full event data for sports matching
         ))
 
         # Store market data
@@ -905,6 +908,225 @@ class EventSyncService:
                     logger.error(f"{exchange} sync failed: {e}")
 
         return results
+
+    def sync_sports_events(self, exchange: Optional[str] = None) -> Dict[str, int]:
+        """
+        Process synced Events and create SportsEvent records for sports-related events.
+        Should be called after sync_all_events or sync_kalshi_events/sync_polymarket_events.
+
+        Args:
+            exchange: Optional filter for 'kalshi' or 'polymarket'. If None, processes both.
+
+        Returns:
+            Dict with counts: {'kalshi_created': N, 'polymarket_created': N}
+        """
+        results = {'kalshi_created': 0, 'polymarket_created': 0}
+
+        # Build query for sports events
+        sports_keywords = ['sports', 'nfl', 'nba', 'mlb', 'nhl', 'football', 'basketball', 'baseball', 'hockey']
+
+        # Get Kalshi sports events
+        if exchange is None or exchange == 'kalshi':
+            kalshi_events = Event.objects.filter(
+                exchange=Exchange.KALSHI,
+                category__icontains='sports'
+            ).exclude(
+                sports_event__isnull=False  # Skip events that already have SportsEvent
+            )
+
+            for event in kalshi_events:
+                try:
+                    sports_event = self._create_kalshi_sports_event(event)
+                    if sports_event:
+                        results['kalshi_created'] += 1
+                except Exception as e:
+                    logger.warning(f"Failed to create SportsEvent for Kalshi event {event.external_id}: {e}")
+
+        # Get Polymarket sports events
+        if exchange is None or exchange == 'polymarket':
+            from django.db.models import Q
+            # Polymarket doesn't have category field, check title and tags in raw_data
+            poly_events = Event.objects.filter(
+                exchange=Exchange.POLYMARKET
+            ).filter(
+                Q(raw_data__tags__0__label__icontains='sports') |
+                Q(raw_data__tags__0__label__icontains='nfl') |
+                Q(raw_data__tags__0__label__icontains='nba') |
+                Q(title__icontains='nfl') |
+                Q(title__icontains='nba') |
+                Q(title__icontains='championship')
+            ).exclude(
+                sports_event__isnull=False  # Skip events that already have SportsEvent
+            )
+
+            for event in poly_events:
+                try:
+                    sports_event = self._create_polymarket_sports_event(event)
+                    if sports_event:
+                        results['polymarket_created'] += 1
+                except Exception as e:
+                    logger.warning(f"Failed to create SportsEvent for Polymarket event {event.external_id}: {e}")
+
+        logger.info(f"Created {results['kalshi_created']} Kalshi SportsEvents, {results['polymarket_created']} Polymarket SportsEvents")
+        return results
+
+    def _create_kalshi_sports_event(self, event: Event) -> Optional[SportsEvent]:
+        """Create SportsEvent from a Kalshi Event"""
+        raw_data = event.raw_data or {}
+
+        # Extract team code from ticker
+        event_ticker = raw_data.get('event_ticker', event.external_id)
+        team_code = SportsEventMatcher.extract_team_code_from_kalshi_ticker(event_ticker)
+
+        # Extract season from ticker or title
+        season, season_year = SportsEventMatcher.extract_season_from_ticker(event_ticker)
+        if not season:
+            season, season_year = SportsEventMatcher.extract_season_from_text(event.title)
+
+        # Detect league and market type
+        league = SportsEventMatcher.detect_league(raw_data, event.title, event.category)
+        market_type = SportsEventMatcher.detect_market_type(raw_data, event.title)
+
+        # Extract division from title or ticker
+        division = SportsEventMatcher.extract_division_from_text(event.title)
+        if not division:
+            division = SportsEventMatcher.extract_division_from_text(event_ticker)
+
+        # Extract conference
+        conference = ''
+        title_upper = event.title.upper()
+        if 'NFC' in title_upper:
+            conference = 'NFC'
+        elif 'AFC' in title_upper:
+            conference = 'AFC'
+
+        # Extract threshold from markets
+        threshold_value, threshold_type = SportsEventMatcher.extract_threshold_from_kalshi(raw_data)
+
+        # Get team name from sub_title or title
+        team_name = ''
+        sub_title = raw_data.get('sub_title', '')
+        if team_code:
+            # Try to find team name in sub_title
+            team_name = sub_title if sub_title else ''
+
+        # Series ticker
+        series_ticker = raw_data.get('series_ticker', '')
+
+        # Competition scope
+        competition_scope = raw_data.get('product_metadata', {}).get('competition_scope', '')
+
+        # Normalize title for matching
+        normalized_title = event.title.lower()
+        normalized_title = ' '.join(normalized_title.split())  # Normalize whitespace
+
+        # Create or update SportsEvent
+        sports_event, created = SportsEvent.objects.update_or_create(
+            event=event,
+            defaults={
+                'league': league,
+                'market_type': market_type,
+                'team_code': team_code,
+                'team_name': team_name,
+                'season': season,
+                'season_year': season_year,
+                'division': division,
+                'conference': conference,
+                'threshold_value': threshold_value,
+                'threshold_type': threshold_type,
+                'series_ticker': series_ticker,
+                'competition_scope': competition_scope,
+                'normalized_title': normalized_title[:500],
+            }
+        )
+
+        return sports_event if created else None
+
+    def _create_polymarket_sports_event(self, event: Event) -> Optional[SportsEvent]:
+        """Create SportsEvent from a Polymarket Event"""
+        raw_data = event.raw_data or {}
+
+        # Extract info from tags
+        tags = raw_data.get('tags', [])
+        has_sports_tag = any(
+            tag.get('label', '').lower() in ['sports', 'nfl', 'nba', 'mlb', 'nhl', 'football', 'basketball']
+            for tag in tags if isinstance(tag, dict)
+        )
+
+        # If no sports tag, check title
+        if not has_sports_tag:
+            title_lower = event.title.lower()
+            if not any(kw in title_lower for kw in ['nfl', 'nba', 'championship', 'football', 'basketball']):
+                return None
+
+        # Extract team info from markets
+        team_code = ''
+        team_name = ''
+        image_team_code = ''
+        group_item_title = ''
+
+        markets = raw_data.get('markets', [])
+        if markets and isinstance(markets, list):
+            first_market = markets[0] if markets else {}
+            if isinstance(first_market, dict):
+                # Get image URL team code
+                image_url = first_market.get('image', first_market.get('icon', ''))
+                image_team_code = SportsEventMatcher.extract_team_code_from_polymarket_image(image_url)
+
+                # Get groupItemTitle
+                group_item_title = first_market.get('groupItemTitle', '')
+                team_code_from_title = SportsEventMatcher.extract_team_from_group_item_title(group_item_title)
+                if team_code_from_title:
+                    team_code = team_code_from_title
+                    team_name = group_item_title
+
+        # If still no team code, try the image
+        if not team_code and image_team_code:
+            team_code = image_team_code
+
+        # Extract season from title/description
+        season, season_year = SportsEventMatcher.extract_season_from_text(event.title)
+        if not season:
+            season, season_year = SportsEventMatcher.extract_season_from_text(event.description)
+
+        # Detect league and market type
+        league = SportsEventMatcher.detect_league(raw_data, event.title, event.category)
+        market_type = SportsEventMatcher.detect_market_type(raw_data, event.title)
+
+        # Extract division
+        division = SportsEventMatcher.extract_division_from_text(event.title)
+
+        # Extract conference
+        conference = ''
+        title_upper = event.title.upper()
+        if 'NFC' in title_upper:
+            conference = 'NFC'
+        elif 'AFC' in title_upper:
+            conference = 'AFC'
+
+        # Normalize title
+        normalized_title = event.title.lower()
+        normalized_title = ' '.join(normalized_title.split())
+
+        # Create or update SportsEvent
+        sports_event, created = SportsEvent.objects.update_or_create(
+            event=event,
+            defaults={
+                'league': league,
+                'market_type': market_type,
+                'team_code': team_code,
+                'team_name': team_name,
+                'image_team_code': image_team_code,
+                'group_item_title': group_item_title,
+                'season': season,
+                'season_year': season_year,
+                'division': division,
+                'conference': conference,
+                'normalized_title': normalized_title[:500],
+            }
+        )
+
+        return sports_event if created else None
 
 
 # Keep MarketSyncService as an alias for backwards compatibility
