@@ -50,22 +50,82 @@ curl "https://api.elections.kalshi.com/trade-api/v2/markets?limit=10&status=open
 {
   "markets": [
     {
-      "ticker": "INXD-24DEC31-B4903",
-      "event_ticker": "INXD-24DEC31",
-      "title": "S&P 500 to close at 4,903 or above on Dec 31?",
-      "subtitle": "S&P 500 End of Day",
-      "status": "open",
-      "yes_bid": 45,
-      "yes_ask": 47,
-      "no_bid": 53,
-      "no_ask": 55,
-      "volume": 12500,
-      "open_interest": 8200,
-      "close_time": "2024-12-31T21:00:00Z",
-      "result": null
+      "ticker": "<string>",
+      "event_ticker": "<string>",
+      "market_type": "binary",
+      "title": "<string>",
+      "subtitle": "<string>",
+      "yes_sub_title": "<string>",
+      "no_sub_title": "<string>",
+      "created_time": "2023-11-07T05:31:56Z",
+      "open_time": "2023-11-07T05:31:56Z",
+      "close_time": "2023-11-07T05:31:56Z",
+      "expiration_time": "2023-11-07T05:31:56Z",
+      "latest_expiration_time": "2023-11-07T05:31:56Z",
+      "settlement_timer_seconds": 123,
+      "status": "initialized",
+      "response_price_units": "usd_cent",
+      "yes_bid": 123,
+      "yes_bid_dollars": "0.5600",
+      "yes_ask": 123,
+      "yes_ask_dollars": "0.5600",
+      "no_bid": 123,
+      "no_bid_dollars": "0.5600",
+      "no_ask": 123,
+      "no_ask_dollars": "0.5600",
+      "last_price": 123,
+      "last_price_dollars": "0.5600",
+      "volume": 123,
+      "volume_24h": 123,
+      "result": "yes",
+      "can_close_early": true,
+      "open_interest": 123,
+      "notional_value": 123,
+      "notional_value_dollars": "0.5600",
+      "previous_yes_bid": 123,
+      "previous_yes_bid_dollars": "0.5600",
+      "previous_yes_ask": 123,
+      "previous_yes_ask_dollars": "0.5600",
+      "previous_price": 123,
+      "previous_price_dollars": "0.5600",
+      "liquidity": 123,
+      "liquidity_dollars": "0.5600",
+      "expiration_value": "<string>",
+      "category": "<string>",
+      "risk_limit_cents": 123,
+      "tick_size": 123,
+      "rules_primary": "<string>",
+      "rules_secondary": "<string>",
+      "price_level_structure": "<string>",
+      "price_ranges": [
+        {
+          "start": "<string>",
+          "end": "<string>",
+          "step": "<string>"
+        }
+      ],
+      "expected_expiration_time": "2023-11-07T05:31:56Z",
+      "settlement_value": 123,
+      "settlement_value_dollars": "0.5600",
+      "fee_waiver_expiration_time": "2023-11-07T05:31:56Z",
+      "early_close_condition": "<string>",
+      "strike_type": "greater",
+      "floor_strike": 123,
+      "cap_strike": 123,
+      "functional_strike": "<string>",
+      "custom_strike": {},
+      "mve_collection_ticker": "<string>",
+      "mve_selected_legs": [
+        {
+          "event_ticker": "<string>",
+          "market_ticker": "<string>",
+          "side": "<string>"
+        }
+      ],
+      "primary_participant_key": "<string>"
     }
   ],
-  "cursor": "eyJsYXN0X2lkIjo..."
+  "cursor": "<string>"
 }
 ```
 
