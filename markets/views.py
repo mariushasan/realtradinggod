@@ -10,7 +10,7 @@ from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 
 from .models import Market, MarketMatch, ArbitrageOpportunity, Exchange, Tag, TagMatch
 from .services import MarketMatcher, TagMatcher, ArbitrageDetector, MarketSyncService
-
+from .api import PolymarketClient
 
 class DashboardView(View):
     """Main dashboard showing arbitrage opportunities"""
@@ -502,8 +502,18 @@ def create_tag(request):
 
             # For Polymarket, generate a custom external_id if not provided
             if exchange == Exchange.POLYMARKET and not external_id:
-                external_id = f"custom_{slug}"
+                tag_data = PolymarketClient().get_tag_by_slug(slug)
 
+                if not tag_data:
+                    return JsonResponse({
+                        'success': False,
+                        'error': f'Tag with slug {slug} not found'
+                    }, status=404)
+
+                external_id = tag_data.get('id')
+                label = tag_data.get('label')
+                slug = tag_data.get('slug')
+                category = ''
             # Check if tag already exists
             existing = Tag.objects.filter(
                 exchange=exchange,
@@ -516,7 +526,7 @@ def create_tag(request):
                     'success': False,
                     'error': f'Tag "{label}" already exists for {exchange}'
                 }, status=400)
-
+                
             tag = Tag.objects.create(
                 exchange=exchange,
                 label=label,

@@ -221,3 +221,7 @@ class PolymarketClient:
         """Get all available tags"""
         params = {'limit': limit}
         return self._gamma_request('/tags', params)
+
+    def get_tag_by_slug(self, slug: str) -> dict:
+        """Get tag by slug"""
+        return self._gamma_request(f'/tags/slug/{slug}')
