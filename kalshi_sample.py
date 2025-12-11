@@ -32,7 +32,9 @@ from cryptography.hazmat.primitives.asymmetric import padding
 class KalshiClient:
     """Standalone Kalshi API Client"""
 
-    BASE_URL = 'https://api.elections.kalshi.com/trade-api/v2'
+    HOST = 'https://api.elections.kalshi.com'
+    API_PATH = '/trade-api/v2'
+    BASE_URL = HOST + API_PATH
     MAX_RETRIES = 3
     RETRY_DELAY = 2
 
@@ -61,13 +63,18 @@ class KalshiClient:
         else:
             print("✗ No API Key ID found in environment")
 
-    def _create_signature(self, timestamp: str, method: str, path: str) -> str:
+    def _create_signature(self, timestamp: str, method: str, path: str, debug: bool = False) -> str:
         """Create RSA-PSS signature for request"""
         if not self.private_key:
             return ''
 
         path_without_query = path.split('?')[0]
-        message = f"{timestamp}{method}{path_without_query}".encode('utf-8')
+        message_str = f"{timestamp}{method}{path_without_query}"
+        message = message_str.encode('utf-8')
+
+        if debug:
+            print(f"  [DEBUG] Signing message: {message_str}")
+
         signature = self.private_key.sign(
             message,
             padding.PSS(
@@ -78,13 +85,14 @@ class KalshiClient:
         )
         return base64.b64encode(signature).decode('utf-8')
 
-    def _get_headers(self, method: str, path: str) -> dict:
+    def _get_headers(self, method: str, path: str, debug: bool = False) -> dict:
         """Get headers for request (authenticated if possible)"""
         headers = {'Content-Type': 'application/json'}
 
         if self.private_key and self.api_key_id:
-            timestamp = str(int(datetime.datetime.now().timestamp() * 1000))
-            signature = self._create_signature(timestamp, method, path)
+            # Use time.time() for millisecond timestamp (matching official SDK)
+            timestamp = str(int(time.time() * 1000))
+            signature = self._create_signature(timestamp, method, path, debug=debug)
             headers.update({
                 'KALSHI-ACCESS-KEY': self.api_key_id,
                 'KALSHI-ACCESS-SIGNATURE': signature,
@@ -93,9 +101,11 @@ class KalshiClient:
 
         return headers
 
-    def _request(self, method: str, path: str, params: dict = None, body: dict = None) -> dict:
+    def _request(self, method: str, path: str, params: dict = None, body: dict = None, debug: bool = False) -> dict:
         """Make request to Kalshi API with retry logic"""
-        url = self.BASE_URL + path
+        # Full path for signing includes API_PATH prefix
+        full_path = self.API_PATH + path
+        url = self.HOST + full_path
 
         if params:
             query_parts = []
@@ -103,10 +113,15 @@ class KalshiClient:
                 if v is not None:
                     query_parts.append(f"{k}={v}")
             if query_parts:
-                path = path + '?' + '&'.join(query_parts)
-                url = self.BASE_URL + path
+                full_path = full_path + '?' + '&'.join(query_parts)
+                url = self.HOST + full_path
 
-        headers = self._get_headers(method, path)
+        if debug:
+            print(f"  [DEBUG] URL: {url}")
+            print(f"  [DEBUG] Full path for signing: {full_path}")
+
+        # Sign the full path (including /trade-api/v2 prefix)
+        headers = self._get_headers(method, full_path, debug=debug)
 
         last_error = None
         for attempt in range(self.MAX_RETRIES):
@@ -184,7 +199,8 @@ class KalshiClient:
     # ========== Order Methods ==========
 
     def create_order(self, ticker: str, side: str, action: str, count: int,
-                     order_type: str = 'limit', yes_price: int = None, no_price: int = None) -> dict:
+                     order_type: str = 'limit', yes_price: int = None, no_price: int = None,
+                     debug: bool = False) -> dict:
         """
         Create an order on a market.
 
@@ -196,6 +212,7 @@ class KalshiClient:
             order_type: 'limit' or 'market'
             yes_price: Price in cents (1-99) for yes side
             no_price: Price in cents (1-99) for no side
+            debug: Print debug info for signature
 
         Returns:
             Order response with order details
@@ -213,7 +230,7 @@ class KalshiClient:
         if no_price is not None:
             body['no_price'] = no_price
 
-        return self._request('POST', '/portfolio/orders', body=body)
+        return self._request('POST', '/portfolio/orders', body=body, debug=debug)
 
     def cancel_order(self, order_id: str) -> dict:
         """
@@ -363,14 +380,15 @@ def place_and_cancel_order(client: KalshiClient, ticker: str, orderbook: dict):
     print(f"  Price: {yes_price}¢")
 
     try:
-        # Place the order
+        # Place the order (with debug enabled to see signature details)
         order_response = client.create_order(
             ticker=ticker,
             side='yes',
             action='buy',
             count=1,
             order_type='limit',
-            yes_price=yes_price
+            yes_price=yes_price,
+            debug=True
         )
 
         order = order_response.get('order', {})
