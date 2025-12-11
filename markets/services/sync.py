@@ -11,6 +11,9 @@ from markets.api import KalshiClient, PolymarketClient
 
 logger = logging.getLogger(__name__)
 
+# Batch size for bulk operations
+BATCH_SIZE = 2000
+
 
 class EventSyncService:
     """Service to sync event data from exchanges to database"""
@@ -18,6 +21,47 @@ class EventSyncService:
     def __init__(self):
         self.kalshi_client = KalshiClient()
         self.poly_client = PolymarketClient()
+
+    def _bulk_create_events(self, events: List[Event], exchange: Exchange) -> Dict[str, Event]:
+        """Bulk create/update events and return a dict mapping external_id to Event"""
+        if not events:
+            return {}
+
+        Event.objects.bulk_create(
+            events,
+            update_conflicts=True,
+            unique_fields=['exchange', 'external_id'],
+            update_fields=[
+                'title', 'description', 'category', 'url',
+                'volume', 'volume_24h', 'liquidity', 'open_interest',
+                'is_active', 'mutually_exclusive', 'end_date'
+            ]
+        )
+
+        # Fetch created/updated events to get their IDs
+        external_ids = [e.external_id for e in events]
+        return {
+            e.external_id: e for e in Event.objects.filter(
+                exchange=exchange,
+                external_id__in=external_ids
+            )
+        }
+
+    def _bulk_create_markets(self, markets: List[Market]) -> None:
+        """Bulk create/update markets"""
+        if not markets:
+            return
+
+        Market.objects.bulk_create(
+            markets,
+            update_conflicts=True,
+            unique_fields=['exchange', 'external_id'],
+            update_fields=[
+                'event', 'event_external_id', 'title', 'description',
+                'outcomes', 'url', 'volume', 'volume_24h', 'liquidity',
+                'open_interest', 'is_active', 'close_time'
+            ]
+        )
 
     def sync_kalshi_tags(self) -> List[Tag]:
         """Fetch Kalshi tags from API and save to database using bulk operations"""
@@ -116,6 +160,79 @@ class EventSyncService:
 
         return result
 
+    def _flush_kalshi_batch(
+        self,
+        events_batch: List[Event],
+        market_data_batch: Dict[str, dict],
+        all_events: List[Event]
+    ) -> None:
+        """Flush a batch of Kalshi events and their markets to the database"""
+        if not events_batch:
+            return
+
+        # Bulk create events and get their IDs
+        event_ids = self._bulk_create_events(events_batch, Exchange.KALSHI)
+        all_events.extend(events_batch)
+
+        # Create markets for this batch
+        markets_to_create = []
+        for event_ticker, data in market_data_batch.items():
+            event = event_ids.get(event_ticker)
+            if not event:
+                continue
+
+            for market_data in data['markets']:
+                ticker = market_data.get('ticker', '')
+                if not ticker:
+                    continue
+
+                # Extract prices
+                yes_ask = market_data.get('yes_ask', 0)
+                no_ask = market_data.get('no_ask', 0)
+
+                # Convert from cents to decimal if needed
+                if yes_ask and yes_ask > 1:
+                    yes_ask = yes_ask / 100
+                if no_ask and no_ask > 1:
+                    no_ask = no_ask / 100
+
+                outcomes = [
+                    {'name': 'Yes', 'price': yes_ask},
+                    {'name': 'No', 'price': no_ask}
+                ]
+
+                # Parse close time
+                close_time = None
+                close_time_str = market_data.get('close_time')
+                if close_time_str:
+                    try:
+                        close_time = datetime.fromisoformat(
+                            close_time_str.replace('Z', '+00:00')
+                        )
+                    except Exception:
+                        pass
+
+                markets_to_create.append(Market(
+                    exchange=Exchange.KALSHI,
+                    external_id=ticker,
+                    event=event,
+                    event_external_id=event_ticker,
+                    title=market_data.get('title', ticker),
+                    description=market_data.get('rules_primary', ''),
+                    outcomes=outcomes,
+                    url=data['url'],
+                    volume=market_data.get('volume', 0) or 0,
+                    volume_24h=market_data.get('volume_24h', 0) or 0,
+                    liquidity=market_data.get('liquidity', 0) or 0,
+                    open_interest=market_data.get('open_interest', 0) or 0,
+                    is_active=market_data.get('status') in ['active', 'open'],
+                    close_time=close_time
+                ))
+
+        # Bulk create markets
+        self._bulk_create_markets(markets_to_create)
+        logger.info(f"Flushed batch: {len(events_batch)} events, {len(markets_to_create)} markets")
+
     def sync_kalshi_events(
         self,
         tag_slugs: Optional[List[str]] = None,
@@ -128,6 +245,7 @@ class EventSyncService:
     ) -> List[Event]:
         """
         Sync events from Kalshi with their nested markets using bulk operations.
+        Events are created in batches of BATCH_SIZE for better performance.
 
         Args:
             tag_slugs: List of tag labels to filter by (uses exact tag name to get series)
@@ -138,9 +256,9 @@ class EventSyncService:
             liquidity_min: Minimum liquidity filter (client-side, API doesn't support)
             liquidity_max: Maximum liquidity filter (client-side, API doesn't support)
         """
-        events_to_create = []
-        markets_to_create = []
-        event_market_map = {}  # Maps event external_id to list of market data
+        all_events = []  # Track all created events
+        events_batch = []  # Current batch of events
+        market_data_batch = {}  # Market data for current batch
 
         # Convert date strings to Unix timestamps for Kalshi API
         min_close_ts = None
@@ -213,7 +331,7 @@ class EventSyncService:
                 except ValueError:
                     pass
 
-            # First pass: prepare all event objects
+            # Process events and batch them
             for event_data in events_data:
                 event_ticker = event_data.get('event_ticker', '')
                 if not event_ticker:
@@ -267,7 +385,7 @@ class EventSyncService:
                     continue
 
                 # Create Event object (not saved yet)
-                events_to_create.append(Event(
+                events_batch.append(Event(
                     exchange=Exchange.KALSHI,
                     external_id=event_ticker,
                     title=event_data.get('title', event_ticker),
@@ -284,104 +402,132 @@ class EventSyncService:
                 ))
 
                 # Store market data for this event
-                event_market_map[event_ticker] = {
+                market_data_batch[event_ticker] = {
                     'markets': markets,
                     'url': url
                 }
 
-            # Bulk create/update events
-            if events_to_create:
-                Event.objects.bulk_create(
-                    events_to_create,
-                    update_conflicts=True,
-                    unique_fields=['exchange', 'external_id'],
-                    update_fields=[
-                        'title', 'description', 'category', 'url',
-                        'volume', 'volume_24h', 'liquidity', 'open_interest',
-                        'is_active', 'mutually_exclusive', 'end_date'
-                    ]
-                )
+                # Flush batch if we've reached the batch size
+                if len(events_batch) >= BATCH_SIZE:
+                    self._flush_kalshi_batch(events_batch, market_data_batch, all_events)
+                    events_batch = []
+                    market_data_batch = {}
 
-            # Fetch all events from DB to get their IDs (needed for FK)
-            event_ids = {e.external_id: e for e in Event.objects.filter(
-                exchange=Exchange.KALSHI,
-                external_id__in=event_market_map.keys()
-            )}
+            # Flush any remaining events
+            if events_batch:
+                self._flush_kalshi_batch(events_batch, market_data_batch, all_events)
 
-            # Second pass: prepare all market objects
-            for event_ticker, data in event_market_map.items():
-                event = event_ids.get(event_ticker)
-                if not event:
-                    continue
-
-                for market_data in data['markets']:
-                    ticker = market_data.get('ticker', '')
-                    if not ticker:
-                        continue
-
-                    # Extract prices
-                    yes_ask = market_data.get('yes_ask', 0)
-                    no_ask = market_data.get('no_ask', 0)
-
-                    # Convert from cents to decimal if needed
-                    if yes_ask and yes_ask > 1:
-                        yes_ask = yes_ask / 100
-                    if no_ask and no_ask > 1:
-                        no_ask = no_ask / 100
-
-                    outcomes = [
-                        {'name': 'Yes', 'price': yes_ask},
-                        {'name': 'No', 'price': no_ask}
-                    ]
-
-                    # Parse close time
-                    close_time = None
-                    close_time_str = market_data.get('close_time')
-                    if close_time_str:
-                        try:
-                            close_time = datetime.fromisoformat(
-                                close_time_str.replace('Z', '+00:00')
-                            )
-                        except Exception:
-                            pass
-
-                    markets_to_create.append(Market(
-                        exchange=Exchange.KALSHI,
-                        external_id=ticker,
-                        event=event,
-                        event_external_id=event_ticker,
-                        title=market_data.get('title', ticker),
-                        description=market_data.get('rules_primary', ''),
-                        outcomes=outcomes,
-                        url=data['url'],
-                        volume=market_data.get('volume', 0) or 0,
-                        volume_24h=market_data.get('volume_24h', 0) or 0,
-                        liquidity=market_data.get('liquidity', 0) or 0,
-                        open_interest=market_data.get('open_interest', 0) or 0,
-                        is_active=market_data.get('status') in ['active', 'open'],
-                        close_time=close_time
-                    ))
-
-            # Bulk create/update markets
-            if markets_to_create:
-                Market.objects.bulk_create(
-                    markets_to_create,
-                    update_conflicts=True,
-                    unique_fields=['exchange', 'external_id'],
-                    update_fields=[
-                        'event', 'event_external_id', 'title', 'description',
-                        'outcomes', 'url', 'volume', 'volume_24h', 'liquidity',
-                        'open_interest', 'is_active', 'close_time'
-                    ]
-                )
-
-            logger.info(f"Synced {len(events_to_create)} Kalshi events with {len(markets_to_create)} markets")
+            logger.info(f"Synced {len(all_events)} Kalshi events total")
 
         except Exception as e:
             logger.error(f"Error syncing Kalshi events: {e}")
             raise
 
-        return events_to_create
+        return all_events
+
+    def _flush_polymarket_batch(
+        self,
+        events_batch: List[Event],
+        market_data_batch: Dict[str, dict],
+        all_events: List[Event]
+    ) -> None:
+        """Flush a batch of Polymarket events and their markets to the database"""
+        if not events_batch:
+            return
+
+        # Bulk create events and get their IDs
+        event_ids = self._bulk_create_events(events_batch, Exchange.POLYMARKET)
+        all_events.extend(events_batch)
+
+        # Create markets for this batch
+        markets_to_create = []
+        for external_id, data in market_data_batch.items():
+            event = event_ids.get(external_id)
+            if not event:
+                continue
+
+            slug = data['slug']
+            for market_data in data['markets']:
+                if not isinstance(market_data, dict):
+                    continue
+
+                condition_id = market_data.get('conditionId', market_data.get('condition_id', ''))
+                market_id = market_data.get('id', '')
+                if not condition_id and not market_id:
+                    continue
+
+                market_external_id = condition_id or market_id
+
+                # Extract outcomes and prices
+                outcomes = []
+                outcome_names = market_data.get('outcomes', '[]')
+                outcome_prices = market_data.get('outcomePrices', '[]')
+
+                if isinstance(outcome_names, str):
+                    try:
+                        outcome_names = json.loads(outcome_names)
+                    except json.JSONDecodeError:
+                        outcome_names = []
+
+                if isinstance(outcome_prices, str):
+                    try:
+                        outcome_prices = json.loads(outcome_prices)
+                    except json.JSONDecodeError:
+                        outcome_prices = []
+
+                for i, name in enumerate(outcome_names):
+                    price = float(outcome_prices[i]) if i < len(outcome_prices) else 0
+                    outcomes.append({
+                        'name': name,
+                        'price': price
+                    })
+
+                # Fallback to tokens format
+                if not outcomes:
+                    tokens = market_data.get('tokens', [])
+                    for token in tokens:
+                        outcome_name = token.get('outcome', '')
+                        price = float(token.get('price', 0))
+                        outcomes.append({
+                            'name': outcome_name,
+                            'price': price,
+                            'token_id': token.get('token_id', '')
+                        })
+
+                # Build market URL
+                market_url = f"https://polymarket.com/event/{slug}" if slug else ''
+
+                # Parse close time
+                close_time = None
+                market_end_date = market_data.get('endDate', market_data.get('end_date_iso'))
+                if market_end_date:
+                    try:
+                        close_time = datetime.fromisoformat(
+                            market_end_date.replace('Z', '+00:00')
+                        )
+                    except Exception:
+                        pass
+
+                markets_to_create.append(Market(
+                    exchange=Exchange.POLYMARKET,
+                    external_id=market_external_id,
+                    event=event,
+                    event_external_id=slug,
+                    title=market_data.get('question', market_data.get('title', '')),
+                    description=market_data.get('description', ''),
+                    outcomes=outcomes,
+                    url=market_url,
+                    volume=float(market_data.get('volumeNum', market_data.get('volume', 0)) or 0),
+                    volume_24h=float(market_data.get('volume24hr', 0) or 0),
+                    liquidity=float(market_data.get('liquidityNum', market_data.get('liquidity', 0)) or 0),
+                    open_interest=0,
+                    is_active=market_data.get('active', True),
+                    close_time=close_time
+                ))
+
+        # Bulk create markets
+        self._bulk_create_markets(markets_to_create)
+        logger.info(f"Flushed batch: {len(events_batch)} events, {len(markets_to_create)} markets")
 
     def sync_polymarket_events(
         self,
@@ -395,6 +541,7 @@ class EventSyncService:
     ) -> List[Event]:
         """
         Sync events from Polymarket with their nested markets using bulk operations.
+        Events are created in batches of BATCH_SIZE for better performance.
 
         Args:
             tag_ids: List of tag IDs to filter by
@@ -405,9 +552,9 @@ class EventSyncService:
             liquidity_min: Minimum liquidity filter
             liquidity_max: Maximum liquidity filter
         """
-        events_to_create = []
-        markets_to_create = []
-        event_market_map = {}  # Maps event external_id to list of market data
+        all_events = []  # Track all created events
+        events_batch = []  # Current batch of events
+        market_data_batch = {}  # Market data for current batch
 
         # Convert date strings to ISO 8601 format for Polymarket API
         end_date_min = None
@@ -461,7 +608,7 @@ class EventSyncService:
 
             logger.info(f"Processing {len(events_data)} Polymarket events")
 
-            # First pass: prepare all event objects
+            # Process events and batch them
             for event_data in events_data:
                 event_id = event_data.get('id', '')
                 slug = event_data.get('slug', '')
@@ -485,7 +632,7 @@ class EventSyncService:
                         pass
 
                 # Create Event object (not saved yet)
-                events_to_create.append(Event(
+                events_batch.append(Event(
                     exchange=Exchange.POLYMARKET,
                     external_id=external_id,
                     title=event_data.get('title', slug),
@@ -502,135 +649,28 @@ class EventSyncService:
                 ))
 
                 # Store market data for this event
-                event_market_map[external_id] = {
+                market_data_batch[external_id] = {
                     'markets': event_data.get('markets', []),
                     'slug': slug
                 }
 
-            # Bulk create/update events
-            if events_to_create:
-                Event.objects.bulk_create(
-                    events_to_create,
-                    update_conflicts=True,
-                    unique_fields=['exchange', 'external_id'],
-                    update_fields=[
-                        'title', 'description', 'category', 'url',
-                        'volume', 'volume_24h', 'liquidity', 'open_interest',
-                        'is_active', 'mutually_exclusive', 'end_date'
-                    ]
-                )
+                # Flush batch if we've reached the batch size
+                if len(events_batch) >= BATCH_SIZE:
+                    self._flush_polymarket_batch(events_batch, market_data_batch, all_events)
+                    events_batch = []
+                    market_data_batch = {}
 
-            # Fetch all events from DB to get their IDs (needed for FK)
-            event_ids = {e.external_id: e for e in Event.objects.filter(
-                exchange=Exchange.POLYMARKET,
-                external_id__in=event_market_map.keys()
-            )}
+            # Flush any remaining events
+            if events_batch:
+                self._flush_polymarket_batch(events_batch, market_data_batch, all_events)
 
-            # Second pass: prepare all market objects
-            for external_id, data in event_market_map.items():
-                event = event_ids.get(external_id)
-                if not event:
-                    continue
-
-                slug = data['slug']
-                for market_data in data['markets']:
-                    if not isinstance(market_data, dict):
-                        continue
-
-                    condition_id = market_data.get('conditionId', market_data.get('condition_id', ''))
-                    market_id = market_data.get('id', '')
-                    if not condition_id and not market_id:
-                        continue
-
-                    market_external_id = condition_id or market_id
-
-                    # Extract outcomes and prices
-                    outcomes = []
-                    outcome_names = market_data.get('outcomes', '[]')
-                    outcome_prices = market_data.get('outcomePrices', '[]')
-
-                    if isinstance(outcome_names, str):
-                        try:
-                            outcome_names = json.loads(outcome_names)
-                        except json.JSONDecodeError:
-                            outcome_names = []
-
-                    if isinstance(outcome_prices, str):
-                        try:
-                            outcome_prices = json.loads(outcome_prices)
-                        except json.JSONDecodeError:
-                            outcome_prices = []
-
-                    for i, name in enumerate(outcome_names):
-                        price = float(outcome_prices[i]) if i < len(outcome_prices) else 0
-                        outcomes.append({
-                            'name': name,
-                            'price': price
-                        })
-
-                    # Fallback to tokens format
-                    if not outcomes:
-                        tokens = market_data.get('tokens', [])
-                        for token in tokens:
-                            outcome_name = token.get('outcome', '')
-                            price = float(token.get('price', 0))
-                            outcomes.append({
-                                'name': outcome_name,
-                                'price': price,
-                                'token_id': token.get('token_id', '')
-                            })
-
-                    # Build market URL
-                    market_url = f"https://polymarket.com/event/{slug}" if slug else ''
-
-                    # Parse close time
-                    close_time = None
-                    market_end_date = market_data.get('endDate', market_data.get('end_date_iso'))
-                    if market_end_date:
-                        try:
-                            close_time = datetime.fromisoformat(
-                                market_end_date.replace('Z', '+00:00')
-                            )
-                        except Exception:
-                            pass
-
-                    markets_to_create.append(Market(
-                        exchange=Exchange.POLYMARKET,
-                        external_id=market_external_id,
-                        event=event,
-                        event_external_id=slug,
-                        title=market_data.get('question', market_data.get('title', '')),
-                        description=market_data.get('description', ''),
-                        outcomes=outcomes,
-                        url=market_url,
-                        volume=float(market_data.get('volumeNum', market_data.get('volume', 0)) or 0),
-                        volume_24h=float(market_data.get('volume24hr', 0) or 0),
-                        liquidity=float(market_data.get('liquidityNum', market_data.get('liquidity', 0)) or 0),
-                        open_interest=0,
-                        is_active=market_data.get('active', True),
-                        close_time=close_time
-                    ))
-
-            # Bulk create/update markets
-            if markets_to_create:
-                Market.objects.bulk_create(
-                    markets_to_create,
-                    update_conflicts=True,
-                    unique_fields=['exchange', 'external_id'],
-                    update_fields=[
-                        'event', 'event_external_id', 'title', 'description',
-                        'outcomes', 'url', 'volume', 'volume_24h', 'liquidity',
-                        'open_interest', 'is_active', 'close_time'
-                    ]
-                )
-
-            logger.info(f"Synced {len(events_to_create)} Polymarket events with {len(markets_to_create)} markets")
+            logger.info(f"Synced {len(all_events)} Polymarket events total")
 
         except Exception as e:
             logger.error(f"Error syncing Polymarket events: {e}")
             raise
 
-        return events_to_create
+        return all_events
 
     def sync_all_events(
         self,
