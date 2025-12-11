@@ -816,8 +816,6 @@
             <div class="logo">Arbitrage Analyzer</div>
             <nav>
                 <a href="{% url 'markets:dashboard' %}" class="{% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}">Dashboard</a>
-                <a href="{% url 'markets:markets_list' %}" class="{% if request.resolver_match.url_name == 'markets_list' %}active{% endif %}">Markets</a>
-                <a href="{% url 'markets:matches_list' %}" class="{% if request.resolver_match.url_name == 'matches_list' %}active{% endif %}">Matches</a>
             </nav>
         </div>
     </header>
