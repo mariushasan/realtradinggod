@@ -130,7 +130,7 @@ class EventSyncService:
         Sync events from Kalshi with their nested markets using bulk operations.
 
         Args:
-            tag_slugs: Not used currently (Kalshi events don't filter by tags directly)
+            tag_slugs: List of tag labels to filter by (uses exact tag name to get series)
             close_after: ISO date string (YYYY-MM-DD) - only sync events with markets closing after this date
             close_before: ISO date string (YYYY-MM-DD) - not directly supported by Kalshi events API
             volume_min: Minimum volume filter (client-side, API doesn't support)
@@ -152,12 +152,38 @@ class EventSyncService:
                 logger.warning(f"Invalid close_after date format: {close_after}")
 
         try:
-            # Fetch regular events with nested markets
-            regular_events = self.kalshi_client.get_all_open_events(min_close_ts=min_close_ts)
-            logger.info(f"Fetched {len(regular_events)} regular Kalshi events")
+            # If tags provided, first get series tickers for those tags
+            series_tickers = None
+            if tag_slugs:
+                series_tickers = self.kalshi_client.get_series_tickers_by_tags(tag_slugs)
+                logger.info(f"Found {len(series_tickers)} series for tags: {tag_slugs}")
+                if not series_tickers:
+                    logger.warning("No series found for the given tags")
+                    return []
 
-            # Fetch multivariate events (events with multiple outcome markets)
-            multivariate_events = self.kalshi_client.get_all_multivariate_events()
+            # Fetch events - either for specific series or all
+            regular_events = []
+            multivariate_events = []
+
+            if series_tickers:
+                # Fetch events for each series ticker
+                for series_ticker in series_tickers:
+                    series_regular = self.kalshi_client.get_all_open_events(
+                        series_ticker=series_ticker,
+                        min_close_ts=min_close_ts
+                    )
+                    regular_events.extend(series_regular)
+
+                    series_multi = self.kalshi_client.get_all_multivariate_events(
+                        series_ticker=series_ticker
+                    )
+                    multivariate_events.extend(series_multi)
+            else:
+                # Fetch all events
+                regular_events = self.kalshi_client.get_all_open_events(min_close_ts=min_close_ts)
+                multivariate_events = self.kalshi_client.get_all_multivariate_events()
+
+            logger.info(f"Fetched {len(regular_events)} regular Kalshi events")
             logger.info(f"Fetched {len(multivariate_events)} multivariate Kalshi events")
 
             # Combine and deduplicate by event_ticker

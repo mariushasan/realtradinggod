@@ -267,6 +267,30 @@ class KalshiClient:
             params['tags'] = tags
         return self._request('GET', '/series', params if params else None)
 
+    def get_series_tickers_by_tags(self, tag_labels: list) -> list:
+        """
+        Get all series tickers that belong to any of the given tags.
+
+        Args:
+            tag_labels: List of tag labels (exact names as returned by tags API)
+
+        Returns:
+            List of unique series tickers
+        """
+        series_tickers = set()
+        for tag_label in tag_labels:
+            try:
+                response = self.get_series(tags=tag_label)
+                series_list = response.get('series', [])
+                for series in series_list:
+                    ticker = series.get('ticker')
+                    if ticker:
+                        series_tickers.add(ticker)
+                logger.info(f"Found {len(series_list)} series for tag '{tag_label}'")
+            except Exception as e:
+                logger.warning(f"Failed to get series for tag '{tag_label}': {e}")
+        return list(series_tickers)
+
     def get_markets_by_series(
         self,
         series_ticker: str,
