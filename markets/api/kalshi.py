@@ -311,7 +311,7 @@ class KalshiClient:
             'series_ticker': series_ticker,
             'collection_ticker': collection_ticker
         }
-        return self._request('GET', '/multivariate_events', params)
+        return self._request('GET', '/events/multivariate', params)
 
     def get_all_multivariate_events(
         self,
@@ -330,6 +330,7 @@ class KalshiClient:
                 collection_ticker=collection_ticker
             )
             events = response.get('events', [])
+            print(len(events))
             all_events.extend(events)
 
             cursor = response.get('cursor')
