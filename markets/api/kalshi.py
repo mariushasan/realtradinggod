@@ -150,6 +150,28 @@ class KalshiClient:
 
         raise last_error
 
+    def _extract_list_from_response(self, response: dict, key: str) -> list:
+        """
+        Safely extract a list from API response.
+
+        Validates that response is a dict and the key contains a list.
+        Returns empty list if validation fails.
+        """
+        if not isinstance(response, dict):
+            logger.error(f"Expected dict response, got {type(response).__name__}")
+            return []
+
+        value = response.get(key)
+        if value is None:
+            logger.warning(f"Response missing '{key}' key")
+            return []
+
+        if not isinstance(value, list):
+            logger.error(f"Expected list for '{key}', got {type(value).__name__}")
+            return []
+
+        return value
+
     def get_events(self, status: str = 'open', limit: int = 200, cursor: str = None, with_nested_markets: bool = True, series_ticker: str = None) -> dict:
         """Get events from Kalshi"""
         params = {
@@ -187,13 +209,16 @@ class KalshiClient:
 
         while True:
             response = self.get_markets(status='open', cursor=cursor)
-            markets = response.get('markets', [])
-            all_markets.extend(markets)
+            markets = self._extract_list_from_response(response, 'markets')
+            if markets:
+                all_markets.extend(markets)
+                logger.debug(f"Fetched {len(markets)} markets (total: {len(all_markets)})")
 
-            cursor = response.get('cursor')
+            cursor = response.get('cursor') if isinstance(response, dict) else None
             if not cursor or not markets:
                 break
 
+        logger.info(f"Fetched total of {len(all_markets)} open markets from Kalshi")
         return all_markets
 
     def get_all_open_events(self, series_ticker: str = None) -> list:
@@ -208,13 +233,16 @@ class KalshiClient:
                 with_nested_markets=True,
                 series_ticker=series_ticker
             )
-            events = response.get('events', [])
-            all_events.extend(events)
+            events = self._extract_list_from_response(response, 'events')
+            if events:
+                all_events.extend(events)
+                logger.debug(f"Fetched {len(events)} events (total: {len(all_events)})")
 
-            cursor = response.get('cursor')
+            cursor = response.get('cursor') if isinstance(response, dict) else None
             if not cursor or not events:
                 break
 
+        logger.info(f"Fetched total of {len(all_events)} open events from Kalshi")
         return all_events
 
     def get_tags_by_categories(self) -> dict:
@@ -238,8 +266,10 @@ class KalshiClient:
         for category in categories:
             try:
                 response = self.get_series(category=category)
-                series_list = response.get('series', [])
+                series_list = self._extract_list_from_response(response, 'series')
                 for series in series_list:
+                    if not isinstance(series, dict):
+                        continue
                     ticker = series.get('ticker', '')
                     if ticker and ticker not in seen_tickers:
                         all_series.append(series)
@@ -247,6 +277,7 @@ class KalshiClient:
             except Exception as e:
                 logger.warning(f"Failed to fetch series for category {category}: {e}")
 
+        logger.info(f"Fetched {len(all_series)} series for {len(categories)} categories")
         return all_series
 
     def get_markets_by_series(self, series_ticker: str, status: str = 'open') -> list:
@@ -262,11 +293,13 @@ class KalshiClient:
                 'cursor': cursor
             }
             response = self._request('GET', '/markets', params)
-            markets = response.get('markets', [])
-            all_markets.extend(markets)
+            markets = self._extract_list_from_response(response, 'markets')
+            if markets:
+                all_markets.extend(markets)
 
-            cursor = response.get('cursor')
+            cursor = response.get('cursor') if isinstance(response, dict) else None
             if not cursor or not markets:
                 break
 
+        logger.debug(f"Fetched {len(all_markets)} markets for series {series_ticker}")
         return all_markets

@@ -109,6 +109,42 @@ class MarketSyncService:
         """Get Polymarket tags from database"""
         return list(Tag.objects.filter(exchange=Exchange.POLYMARKET).order_by('label'))
 
+    def _extract_kalshi_price(self, dollars_value, cents_value) -> float:
+        """
+        Safely extract price from Kalshi API response.
+
+        Prefers the _dollars field (string like "0.5600") over cent values.
+        Returns price as a float between 0 and 1.
+        """
+        # Try dollars value first (string format like "0.5600")
+        if dollars_value is not None:
+            try:
+                price = float(dollars_value)
+                # Sanity check - price should be between 0 and 1
+                if 0 <= price <= 1:
+                    return price
+                # If > 1, might be in wrong format, log and fall through
+                logger.warning(f"Kalshi dollars value out of range: {dollars_value}")
+            except (TypeError, ValueError) as e:
+                logger.warning(f"Could not parse Kalshi dollars value '{dollars_value}': {e}")
+
+        # Fall back to cents value (integer 0-100)
+        if cents_value is not None:
+            try:
+                cents = float(cents_value)
+                # Kalshi cents are 0-100 representing probability percentage
+                if 0 <= cents <= 100:
+                    return cents / 100
+                elif cents > 100:
+                    # Might be basis points (0-10000), convert accordingly
+                    logger.warning(f"Kalshi cents value > 100: {cents_value}, treating as basis points")
+                    return cents / 10000
+            except (TypeError, ValueError) as e:
+                logger.warning(f"Could not parse Kalshi cents value '{cents_value}': {e}")
+
+        # Default to 0 if both fail
+        return 0.0
+
     def sync_kalshi_markets(self, tag_slugs: Optional[List[str]] = None) -> List[Market]:
         """
         Sync markets from Kalshi, optionally filtered by tag slugs.
@@ -177,19 +213,20 @@ class MarketSyncService:
 
                 event_ticker = market_data.get('event_ticker', '')
 
-                # Extract prices
-                yes_ask = market_data.get('yes_ask', 0)
-                no_ask = market_data.get('no_ask', 0)
-
-                # Convert from cents to decimal if needed
-                if yes_ask and yes_ask > 1:
-                    yes_ask = yes_ask / 100
-                if no_ask and no_ask > 1:
-                    no_ask = no_ask / 100
+                # Extract prices - prefer _dollars fields (string format like "0.5600")
+                # Fall back to cent values if _dollars not available
+                yes_price = self._extract_kalshi_price(
+                    market_data.get('yes_ask_dollars'),
+                    market_data.get('yes_ask')
+                )
+                no_price = self._extract_kalshi_price(
+                    market_data.get('no_ask_dollars'),
+                    market_data.get('no_ask')
+                )
 
                 outcomes = [
-                    {'name': 'Yes', 'price': yes_ask},
-                    {'name': 'No', 'price': no_ask}
+                    {'name': 'Yes', 'price': yes_price},
+                    {'name': 'No', 'price': no_price}
                 ]
 
                 # Build URL - Kalshi uses event ticker in URL
@@ -206,30 +243,41 @@ class MarketSyncService:
                     except Exception:
                         pass
 
-                market, created = Market.objects.update_or_create(
-                    exchange=Exchange.KALSHI,
-                    external_id=ticker,
-                    defaults={
-                        'event_external_id': event_ticker,
-                        'title': market_data.get('title', ticker),
-                        'description': market_data.get('rules_primary', ''),
-                        'outcomes': outcomes,
-                        'url': url,
-                        'is_active': market_data.get('status') in ['active', 'open'],
-                        'close_time': close_time
-                    }
-                )
+                # Determine if market is active
+                # Kalshi statuses: active, open, finalized, settled, closed
+                market_status = market_data.get('status', '')
+                is_active = market_status in ['active', 'open']
 
-                # Associate market with the tags used for syncing
-                if tag_objects:
-                    market.tags.add(*tag_objects)
+                try:
+                    market, created = Market.objects.update_or_create(
+                        exchange=Exchange.KALSHI,
+                        external_id=ticker,
+                        defaults={
+                            'event_external_id': event_ticker,
+                            'title': market_data.get('title', ticker),
+                            'description': market_data.get('rules_primary', ''),
+                            'outcomes': outcomes,
+                            'url': url,
+                            'is_active': is_active,
+                            'close_time': close_time
+                        }
+                    )
 
-                synced.append(market)
+                    # Associate market with the tags used for syncing
+                    if tag_objects:
+                        market.tags.add(*tag_objects)
+
+                    synced.append(market)
+                    if created:
+                        logger.debug(f"Created new Kalshi market: {ticker}")
+                except Exception as e:
+                    logger.error(f"Failed to save Kalshi market {ticker}: {e}")
 
         except Exception as e:
             logger.error(f"Error syncing Kalshi markets: {e}")
             raise
 
+        logger.info(f"Successfully synced {len(synced)} Kalshi markets to database")
         return synced
 
     def sync_polymarket_markets(self, tag_ids: Optional[List[int]] = None) -> List[Market]:
