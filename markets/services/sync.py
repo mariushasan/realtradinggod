@@ -144,9 +144,24 @@ class EventSyncService:
                 logger.warning(f"Invalid close_after date format: {close_after}")
 
         try:
-            # Fetch all events with nested markets
-            events_data = self.kalshi_client.get_all_open_events(min_close_ts=min_close_ts)
-            logger.info(f"Processing {len(events_data)} Kalshi events")
+            # Fetch regular events with nested markets
+            regular_events = self.kalshi_client.get_all_open_events(min_close_ts=min_close_ts)
+            logger.info(f"Fetched {len(regular_events)} regular Kalshi events")
+
+            # Fetch multivariate events (events with multiple outcome markets)
+            multivariate_events = self.kalshi_client.get_all_multivariate_events()
+            logger.info(f"Fetched {len(multivariate_events)} multivariate Kalshi events")
+
+            # Combine and deduplicate by event_ticker
+            seen_tickers = set()
+            events_data = []
+            for event in regular_events + multivariate_events:
+                ticker = event.get('event_ticker', '')
+                if ticker and ticker not in seen_tickers:
+                    seen_tickers.add(ticker)
+                    events_data.append(event)
+
+            logger.info(f"Processing {len(events_data)} total Kalshi events (deduplicated)")
 
             # First pass: prepare all event objects
             for event_data in events_data:

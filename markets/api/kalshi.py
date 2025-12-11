@@ -294,3 +294,48 @@ class KalshiClient:
                 break
 
         return all_markets
+
+    def get_multivariate_events(
+        self,
+        limit: int = 200,
+        cursor: str = None,
+        with_nested_markets: bool = True,
+        series_ticker: str = None,
+        collection_ticker: str = None
+    ) -> dict:
+        """Get multivariate events (events with multiple outcome markets like "Who wins election")"""
+        params = {
+            'limit': limit,
+            'cursor': cursor,
+            'with_nested_markets': str(with_nested_markets).lower(),
+            'series_ticker': series_ticker,
+            'collection_ticker': collection_ticker
+        }
+        return self._request('GET', '/multivariate_events', params)
+
+    def get_all_multivariate_events(
+        self,
+        series_ticker: str = None,
+        collection_ticker: str = None
+    ) -> list:
+        """Fetch all multivariate events with pagination"""
+        all_events = []
+        cursor = None
+
+        while True:
+            response = self.get_multivariate_events(
+                cursor=cursor,
+                with_nested_markets=True,
+                series_ticker=series_ticker,
+                collection_ticker=collection_ticker
+            )
+            events = response.get('events', [])
+            all_events.extend(events)
+
+            cursor = response.get('cursor')
+            if not cursor or not events:
+                break
+
+            logger.info(f"Fetched {len(events)} Kalshi multivariate events (total: {len(all_events)})")
+
+        return all_events
