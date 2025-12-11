@@ -148,17 +148,34 @@ class MatchesListView(View):
 
 @csrf_exempt
 def sync_markets(request):
-    """Sync markets from exchanges (fetch and save only)"""
+    """
+    Sync markets from exchanges (fetch and save only).
+
+    POST parameters (optional):
+        kalshi_category: Filter Kalshi markets by category (e.g., 'Politics', 'Economics')
+        kalshi_tags: Filter Kalshi markets by tags (comma-separated, e.g., 'fed,inflation')
+    """
     if request.method == 'POST':
         sync_service = MarketSyncService()
 
+        # Get optional Kalshi category/tags filters from request
+        kalshi_category = request.POST.get('kalshi_category') or request.GET.get('kalshi_category')
+        kalshi_tags = request.POST.get('kalshi_tags') or request.GET.get('kalshi_tags')
+
         try:
-            results = sync_service.sync_all()
+            results = sync_service.sync_all(
+                kalshi_category=kalshi_category,
+                kalshi_tags=kalshi_tags
+            )
 
             return JsonResponse({
                 'success': True,
                 'kalshi_synced': len(results['kalshi']),
                 'polymarket_synced': len(results['polymarket']),
+                'filters': {
+                    'kalshi_category': kalshi_category,
+                    'kalshi_tags': kalshi_tags
+                }
             })
 
         except Exception as e:

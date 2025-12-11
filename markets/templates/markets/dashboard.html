@@ -24,16 +24,31 @@
 
 <div class="section-header">
     <h2>Actions</h2>
-    <div>
-        <button class="btn primary" onclick="syncMarkets()" id="syncBtn">
-            Sync Markets
-            <span class="loading" id="syncLoading">...</span>
-        </button>
-        <button class="btn" onclick="refreshOpportunities()" id="refreshBtn">
-            Refresh Opportunities
-            <span class="loading" id="refreshLoading">...</span>
-        </button>
-    </div>
+</div>
+
+<div class="filter-bar">
+    <label style="color: #666;">Kalshi Filter:</label>
+    <select id="kalshiCategory">
+        <option value="">All Categories</option>
+        <option value="Politics">Politics</option>
+        <option value="Economics">Economics</option>
+        <option value="Sports">Sports</option>
+        <option value="Entertainment">Entertainment</option>
+        <option value="Science">Science</option>
+        <option value="Weather">Weather</option>
+        <option value="Culture">Culture</option>
+        <option value="Tech">Tech</option>
+    </select>
+    <input type="text" id="kalshiTags" placeholder="Tags (e.g., fed,inflation)"
+           style="background: #222; color: #fff; border: 1px solid #333; padding: 8px 12px; border-radius: 6px; width: 200px;">
+    <button class="btn primary" onclick="syncMarkets()" id="syncBtn">
+        Sync Markets
+        <span class="loading" id="syncLoading">...</span>
+    </button>
+    <button class="btn" onclick="refreshOpportunities()" id="refreshBtn">
+        Refresh Opportunities
+        <span class="loading" id="refreshLoading">...</span>
+    </button>
 </div>
 
 <div class="section-header">
@@ -184,18 +199,36 @@
         btn.disabled = true;
         loading.style.display = 'inline';
 
+        // Get filter values
+        const kalshiCategory = document.getElementById('kalshiCategory').value;
+        const kalshiTags = document.getElementById('kalshiTags').value.trim();
+
+        // Build form data
+        const formData = new FormData();
+        if (kalshiCategory) {
+            formData.append('kalshi_category', kalshiCategory);
+        }
+        if (kalshiTags) {
+            formData.append('kalshi_tags', kalshiTags);
+        }
+
         try {
             const response = await fetch('{% url "markets:sync_markets" %}', {
                 method: 'POST',
                 headers: {
                     'X-CSRFToken': getCookie('csrftoken'),
-                }
+                },
+                body: formData
             });
 
             const data = await response.json();
 
             if (data.success) {
-                showToast(`Synced: ${data.kalshi_synced} Kalshi, ${data.polymarket_synced} Polymarket markets`);
+                let msg = `Synced: ${data.kalshi_synced} Kalshi, ${data.polymarket_synced} Polymarket markets`;
+                if (data.filters.kalshi_category || data.filters.kalshi_tags) {
+                    msg += ` (filtered)`;
+                }
+                showToast(msg);
                 setTimeout(() => location.reload(), 1500);
             } else {
                 showToast('Error: ' + data.error, 'error');
