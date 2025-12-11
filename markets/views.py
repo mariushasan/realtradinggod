@@ -180,16 +180,16 @@ def sync_markets(request):
 
         try:
             # Parse request body for tag filters
-            kalshi_series_tickers = None
+            kalshi_tag_slugs = None
             polymarket_tag_ids = None
 
             if request.body:
                 try:
                     data = json.loads(request.body)
-                    # Kalshi: list of series tickers (tag slugs)
+                    # Kalshi: list of tag slugs (used to get categories, then series, then markets)
                     kalshi_tags = data.get('kalshi_tags', [])
                     if kalshi_tags:
-                        kalshi_series_tickers = kalshi_tags
+                        kalshi_tag_slugs = kalshi_tags
 
                     # Polymarket: list of tag IDs
                     poly_tags = data.get('polymarket_tags', [])
@@ -199,7 +199,7 @@ def sync_markets(request):
                     pass
 
             results = sync_service.sync_all(
-                kalshi_series_tickers=kalshi_series_tickers,
+                kalshi_tag_slugs=kalshi_tag_slugs,
                 polymarket_tag_ids=polymarket_tag_ids
             )
 

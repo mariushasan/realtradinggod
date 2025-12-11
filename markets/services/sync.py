@@ -109,91 +109,122 @@ class MarketSyncService:
         """Get Polymarket tags from database"""
         return list(Tag.objects.filter(exchange=Exchange.POLYMARKET).order_by('label'))
 
-    def sync_kalshi_markets(self, series_tickers: Optional[List[str]] = None) -> List[Market]:
-        """Sync markets from Kalshi, optionally filtered by series tickers (tags)"""
+    def sync_kalshi_markets(self, tag_slugs: Optional[List[str]] = None) -> List[Market]:
+        """
+        Sync markets from Kalshi, optionally filtered by tag slugs.
+
+        Kalshi's API structure requires a two-step process:
+        1. Get series that match the selected categories (tags belong to categories)
+        2. Get markets for those series
+        """
         synced = []
 
         # Get Tag objects for the selected slugs
         tag_objects = []
-        if series_tickers:
+        categories = set()
+        if tag_slugs:
             tag_objects = list(Tag.objects.filter(
                 exchange=Exchange.KALSHI,
-                slug__in=series_tickers
+                slug__in=tag_slugs
             ))
+            # Get unique categories from the selected tags
+            for tag in tag_objects:
+                if tag.category:
+                    categories.add(tag.category)
 
         try:
-            # If series_tickers provided, fetch events for each series
-            if series_tickers:
-                events = []
-                seen_event_tickers = set()
+            markets_data = []
+            seen_tickers = set()
+
+            if categories:
+                # Step 1: Get series for each category
+                logger.info(f"Fetching series for Kalshi categories: {categories}")
+                series_tickers = set()
+                for category in categories:
+                    try:
+                        response = self.kalshi_client.get_series(category=category)
+                        series_list = response.get('series', [])
+                        for series in series_list:
+                            ticker = series.get('ticker', '')
+                            if ticker:
+                                series_tickers.add(ticker)
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch series for category {category}: {e}")
+
+                logger.info(f"Found {len(series_tickers)} series tickers for selected categories")
+
+                # Step 2: Get markets for each series
                 for series_ticker in series_tickers:
-                    series_events = self.kalshi_client.get_all_open_events(series_ticker=series_ticker)
-                    for event in series_events:
-                        event_ticker = event.get('event_ticker', '')
-                        if event_ticker not in seen_event_tickers:
-                            events.append(event)
-                            seen_event_tickers.add(event_ticker)
+                    try:
+                        series_markets = self.kalshi_client.get_markets_by_series(series_ticker)
+                        for market in series_markets:
+                            ticker = market.get('ticker', '')
+                            if ticker and ticker not in seen_tickers:
+                                markets_data.append(market)
+                                seen_tickers.add(ticker)
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch markets for series {series_ticker}: {e}")
             else:
-                events = self.kalshi_client.get_all_open_events()
+                # No filter - fetch all open markets
+                markets_data = self.kalshi_client.get_all_open_markets()
 
-            for event in events:
-                event_ticker = event.get('event_ticker', '')
-                markets = event.get('markets', [])
+            logger.info(f"Processing {len(markets_data)} Kalshi markets")
 
-                for market_data in markets:
-                    ticker = market_data.get('ticker', '')
-                    if not ticker:
-                        continue
+            for market_data in markets_data:
+                ticker = market_data.get('ticker', '')
+                if not ticker:
+                    continue
 
-                    # Extract prices
-                    yes_ask = market_data.get('yes_ask', 0)
-                    no_ask = market_data.get('no_ask', 0)
+                event_ticker = market_data.get('event_ticker', '')
 
-                    # Convert from cents to decimal if needed
-                    if yes_ask and yes_ask > 1:
-                        yes_ask = yes_ask / 100
-                    if no_ask and no_ask > 1:
-                        no_ask = no_ask / 100
+                # Extract prices
+                yes_ask = market_data.get('yes_ask', 0)
+                no_ask = market_data.get('no_ask', 0)
 
-                    outcomes = [
-                        {'name': 'Yes', 'price': yes_ask},
-                        {'name': 'No', 'price': no_ask}
-                    ]
+                # Convert from cents to decimal if needed
+                if yes_ask and yes_ask > 1:
+                    yes_ask = yes_ask / 100
+                if no_ask and no_ask > 1:
+                    no_ask = no_ask / 100
 
-                    # Build URL - Kalshi uses event ticker in URL
-                    # Format: https://kalshi.com/markets/EVENT_TICKER
-                    url = f"https://kalshi.com/markets/{event_ticker}"
+                outcomes = [
+                    {'name': 'Yes', 'price': yes_ask},
+                    {'name': 'No', 'price': no_ask}
+                ]
 
-                    # Parse close time
-                    close_time = None
-                    close_time_str = market_data.get('close_time')
-                    if close_time_str:
-                        try:
-                            close_time = datetime.fromisoformat(
-                                close_time_str.replace('Z', '+00:00')
-                            )
-                        except Exception:
-                            pass
+                # Build URL - Kalshi uses event ticker in URL
+                url = f"https://kalshi.com/markets/{event_ticker}" if event_ticker else ''
 
-                    market, created = Market.objects.update_or_create(
-                        exchange=Exchange.KALSHI,
-                        external_id=ticker,
-                        defaults={
-                            'event_external_id': event_ticker,
-                            'title': market_data.get('title', ticker),
-                            'description': market_data.get('rules_primary', ''),
-                            'outcomes': outcomes,
-                            'url': url,
-                            'is_active': market_data.get('status') in ['active', 'open'],
-                            'close_time': close_time
-                        }
-                    )
+                # Parse close time
+                close_time = None
+                close_time_str = market_data.get('close_time')
+                if close_time_str:
+                    try:
+                        close_time = datetime.fromisoformat(
+                            close_time_str.replace('Z', '+00:00')
+                        )
+                    except Exception:
+                        pass
 
-                    # Associate market with the tags used for syncing
-                    if tag_objects:
-                        market.tags.add(*tag_objects)
+                market, created = Market.objects.update_or_create(
+                    exchange=Exchange.KALSHI,
+                    external_id=ticker,
+                    defaults={
+                        'event_external_id': event_ticker,
+                        'title': market_data.get('title', ticker),
+                        'description': market_data.get('rules_primary', ''),
+                        'outcomes': outcomes,
+                        'url': url,
+                        'is_active': market_data.get('status') in ['active', 'open'],
+                        'close_time': close_time
+                    }
+                )
 
-                    synced.append(market)
+                # Associate market with the tags used for syncing
+                if tag_objects:
+                    market.tags.add(*tag_objects)
+
+                synced.append(market)
 
         except Exception as e:
             logger.error(f"Error syncing Kalshi markets: {e}")
@@ -317,7 +348,7 @@ class MarketSyncService:
 
     def sync_all(
         self,
-        kalshi_series_tickers: Optional[List[str]] = None,
+        kalshi_tag_slugs: Optional[List[str]] = None,
         polymarket_tag_ids: Optional[List[int]] = None
     ) -> Dict[str, List[Market]]:
         """Sync markets from all exchanges in parallel, with optional tag filtering"""
@@ -329,7 +360,7 @@ class MarketSyncService:
         # Run both syncs in parallel
         with ThreadPoolExecutor(max_workers=2) as executor:
             futures = {
-                executor.submit(self.sync_kalshi_markets, kalshi_series_tickers): 'kalshi',
+                executor.submit(self.sync_kalshi_markets, kalshi_tag_slugs): 'kalshi',
                 executor.submit(self.sync_polymarket_markets, polymarket_tag_ids): 'polymarket'
             }
 
