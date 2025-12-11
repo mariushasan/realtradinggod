@@ -19,12 +19,33 @@ class MarketSyncService:
         self.kalshi_client = KalshiClient()
         self.poly_client = PolymarketClient()
 
-    def sync_kalshi_markets(self) -> List[Market]:
-        """Sync markets from Kalshi"""
+    def sync_kalshi_markets(self, category: str = None, tags: str = None) -> List[Market]:
+        """
+        Sync markets from Kalshi.
+
+        Args:
+            category: Optional category filter (e.g., 'Politics', 'Economics', 'Sports').
+                     When provided, only markets from series in this category are synced.
+            tags: Optional tags filter (comma-separated, e.g., 'fed,inflation').
+                  When provided, only markets from series with these tags are synced.
+
+        Note: Kalshi's API structure requires a two-step filtering process:
+              1. First fetch series matching the category/tags
+              2. Then fetch events/markets for those series
+        """
         synced = []
 
         try:
-            events = self.kalshi_client.get_all_open_events()
+            # Use category/tag filtering if provided, otherwise fetch all
+            if category or tags:
+                events = self.kalshi_client.get_events_by_category(
+                    category=category,
+                    tags=tags,
+                    status='open',
+                    with_nested_markets=True
+                )
+            else:
+                events = self.kalshi_client.get_all_open_events()
 
             for event in events:
                 event_ticker = event.get('event_ticker', '')
@@ -174,8 +195,14 @@ class MarketSyncService:
 
         return synced
 
-    def sync_all(self) -> Dict[str, List[Market]]:
-        """Sync markets from all exchanges in parallel"""
+    def sync_all(self, kalshi_category: str = None, kalshi_tags: str = None) -> Dict[str, List[Market]]:
+        """
+        Sync markets from all exchanges in parallel.
+
+        Args:
+            kalshi_category: Optional category filter for Kalshi markets
+            kalshi_tags: Optional tags filter for Kalshi markets (comma-separated)
+        """
         results = {
             'kalshi': [],
             'polymarket': []
@@ -184,7 +211,7 @@ class MarketSyncService:
         # Run both syncs in parallel
         with ThreadPoolExecutor(max_workers=2) as executor:
             futures = {
-                executor.submit(self.sync_kalshi_markets): 'kalshi',
+                executor.submit(self.sync_kalshi_markets, kalshi_category, kalshi_tags): 'kalshi',
                 executor.submit(self.sync_polymarket_markets): 'polymarket'
             }
 

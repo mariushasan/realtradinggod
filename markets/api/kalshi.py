@@ -159,3 +159,161 @@ class KalshiClient:
                 break
 
         return all_events
+
+    def get_tags_by_categories(self) -> dict:
+        """Get all tags organized by categories"""
+        response = self._request('GET', '/search/tags_by_categories')
+        return response.get('tags_by_categories', {})
+
+    def get_series(self, series_ticker: str, include_product_metadata: bool = False) -> dict:
+        """Get a single series by ticker"""
+        params = {'include_product_metadata': str(include_product_metadata).lower()}
+        return self._request('GET', f'/series/{series_ticker}', params)
+
+    def get_series_list(self, category: str = None, tags: str = None, include_product_metadata: bool = False) -> list:
+        """
+        Get list of series with optional filtering by category or tags.
+
+        Args:
+            category: Filter by category (e.g., 'Politics', 'Economics', 'Sports')
+            tags: Filter by tags (comma-separated, e.g., 'fed,inflation')
+            include_product_metadata: Include additional product metadata
+
+        Returns:
+            List of series objects
+        """
+        params = {
+            'category': category,
+            'tags': tags,
+            'include_product_metadata': str(include_product_metadata).lower()
+        }
+        # Remove None values
+        params = {k: v for k, v in params.items() if v is not None}
+        response = self._request('GET', '/series', params if params else None)
+        return response.get('series', [])
+
+    def get_markets_by_series(self, series_ticker: str, status: str = 'open', limit: int = 200, cursor: str = None) -> dict:
+        """Get markets filtered by series ticker"""
+        params = {
+            'series_ticker': series_ticker,
+            'status': status,
+            'limit': limit,
+            'cursor': cursor
+        }
+        return self._request('GET', '/markets', params)
+
+    def get_all_markets_by_series(self, series_ticker: str, status: str = 'open') -> list:
+        """Fetch all markets for a series with pagination"""
+        all_markets = []
+        cursor = None
+
+        while True:
+            response = self.get_markets_by_series(series_ticker, status=status, cursor=cursor)
+            markets = response.get('markets', [])
+            all_markets.extend(markets)
+
+            cursor = response.get('cursor')
+            if not cursor or not markets:
+                break
+
+        return all_markets
+
+    def get_markets_by_category(self, category: str = None, tags: str = None, status: str = 'open') -> list:
+        """
+        Get markets filtered by category/tags using a two-step process:
+        1. Fetch series matching the category/tags
+        2. Fetch markets for those series
+
+        Args:
+            category: Filter by category (e.g., 'Politics', 'Economics')
+            tags: Filter by tags (comma-separated)
+            status: Market status filter
+
+        Returns:
+            List of market objects
+        """
+        # Step 1: Get series matching the category/tags
+        series_list = self.get_series_list(category=category, tags=tags)
+
+        if not series_list:
+            logger.info(f"No series found for category={category}, tags={tags}")
+            return []
+
+        # Step 2: Fetch markets for each series
+        all_markets = []
+        for series in series_list:
+            series_ticker = series.get('ticker')
+            if series_ticker:
+                markets = self.get_all_markets_by_series(series_ticker, status=status)
+                # Add series metadata to each market for reference
+                for market in markets:
+                    market['_series_category'] = series.get('category')
+                    market['_series_tags'] = series.get('tags', [])
+                all_markets.extend(markets)
+
+        logger.info(f"Found {len(all_markets)} markets for category={category}, tags={tags} across {len(series_list)} series")
+        return all_markets
+
+    def get_events_by_series(self, series_ticker: str, status: str = 'open', limit: int = 200, cursor: str = None, with_nested_markets: bool = True) -> dict:
+        """Get events filtered by series ticker"""
+        params = {
+            'series_ticker': series_ticker,
+            'status': status,
+            'limit': limit,
+            'cursor': cursor,
+            'with_nested_markets': str(with_nested_markets).lower()
+        }
+        return self._request('GET', '/events', params)
+
+    def get_all_events_by_series(self, series_ticker: str, status: str = 'open', with_nested_markets: bool = True) -> list:
+        """Fetch all events for a series with pagination"""
+        all_events = []
+        cursor = None
+
+        while True:
+            response = self.get_events_by_series(series_ticker, status=status, cursor=cursor, with_nested_markets=with_nested_markets)
+            events = response.get('events', [])
+            all_events.extend(events)
+
+            cursor = response.get('cursor')
+            if not cursor or not events:
+                break
+
+        return all_events
+
+    def get_events_by_category(self, category: str = None, tags: str = None, status: str = 'open', with_nested_markets: bool = True) -> list:
+        """
+        Get events filtered by category/tags using a two-step process:
+        1. Fetch series matching the category/tags
+        2. Fetch events for those series
+
+        Args:
+            category: Filter by category (e.g., 'Politics', 'Economics')
+            tags: Filter by tags (comma-separated)
+            status: Event status filter
+            with_nested_markets: Include nested markets in response
+
+        Returns:
+            List of event objects with their markets
+        """
+        # Step 1: Get series matching the category/tags
+        series_list = self.get_series_list(category=category, tags=tags)
+
+        if not series_list:
+            logger.info(f"No series found for category={category}, tags={tags}")
+            return []
+
+        # Step 2: Fetch events for each series
+        all_events = []
+        for series in series_list:
+            series_ticker = series.get('ticker')
+            if series_ticker:
+                events = self.get_all_events_by_series(series_ticker, status=status, with_nested_markets=with_nested_markets)
+                # Add series metadata to each event for reference
+                for event in events:
+                    event['_series_category'] = series.get('category')
+                    event['_series_tags'] = series.get('tags', [])
+                all_events.extend(events)
+
+        logger.info(f"Found {len(all_events)} events for category={category}, tags={tags} across {len(series_list)} series")
+        return all_events
