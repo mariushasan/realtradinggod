@@ -120,7 +120,11 @@ class EventSyncService:
         self,
         tag_slugs: Optional[List[str]] = None,
         close_after: Optional[str] = None,
-        close_before: Optional[str] = None
+        close_before: Optional[str] = None,
+        volume_min: Optional[float] = None,
+        volume_max: Optional[float] = None,
+        liquidity_min: Optional[float] = None,
+        liquidity_max: Optional[float] = None
     ) -> List[Event]:
         """
         Sync events from Kalshi with their nested markets using bulk operations.
@@ -129,6 +133,10 @@ class EventSyncService:
             tag_slugs: Not used currently (Kalshi events don't filter by tags directly)
             close_after: ISO date string (YYYY-MM-DD) - only sync events with markets closing after this date
             close_before: ISO date string (YYYY-MM-DD) - not directly supported by Kalshi events API
+            volume_min: Minimum volume filter (client-side, API doesn't support)
+            volume_max: Maximum volume filter (client-side, API doesn't support)
+            liquidity_min: Minimum liquidity filter (client-side, API doesn't support)
+            liquidity_max: Maximum liquidity filter (client-side, API doesn't support)
         """
         events_to_create = []
         markets_to_create = []
@@ -218,6 +226,16 @@ class EventSyncService:
                 total_volume_24h = sum(m.get('volume_24h', 0) or 0 for m in markets)
                 total_liquidity = sum(m.get('liquidity', 0) or 0 for m in markets)
                 total_open_interest = sum(m.get('open_interest', 0) or 0 for m in markets)
+
+                # Client-side volume/liquidity filtering (Kalshi API doesn't support these)
+                if volume_min is not None and total_volume < volume_min:
+                    continue
+                if volume_max is not None and total_volume > volume_max:
+                    continue
+                if liquidity_min is not None and total_liquidity < liquidity_min:
+                    continue
+                if liquidity_max is not None and total_liquidity > liquidity_max:
+                    continue
 
                 # Create Event object (not saved yet)
                 events_to_create.append(Event(
@@ -342,7 +360,9 @@ class EventSyncService:
         close_after: Optional[str] = None,
         close_before: Optional[str] = None,
         volume_min: Optional[float] = None,
-        liquidity_min: Optional[float] = None
+        volume_max: Optional[float] = None,
+        liquidity_min: Optional[float] = None,
+        liquidity_max: Optional[float] = None
     ) -> List[Event]:
         """
         Sync events from Polymarket with their nested markets using bulk operations.
@@ -352,7 +372,9 @@ class EventSyncService:
             close_after: ISO date string (YYYY-MM-DD) - only sync events closing after this date
             close_before: ISO date string (YYYY-MM-DD) - only sync events closing before this date
             volume_min: Minimum volume filter
+            volume_max: Maximum volume filter
             liquidity_min: Minimum liquidity filter
+            liquidity_max: Maximum liquidity filter
         """
         events_to_create = []
         markets_to_create = []
@@ -384,7 +406,9 @@ class EventSyncService:
                         end_date_min=end_date_min,
                         end_date_max=end_date_max,
                         volume_min=volume_min,
-                        liquidity_min=liquidity_min
+                        volume_max=volume_max,
+                        liquidity_min=liquidity_min,
+                        liquidity_max=liquidity_max
                     )
                     events_data.extend(tag_events)
                 # Deduplicate by event ID
@@ -401,7 +425,9 @@ class EventSyncService:
                     end_date_min=end_date_min,
                     end_date_max=end_date_max,
                     volume_min=volume_min,
-                    liquidity_min=liquidity_min
+                    volume_max=volume_max,
+                    liquidity_min=liquidity_min,
+                    liquidity_max=liquidity_max
                 )
 
             logger.info(f"Processing {len(events_data)} Polymarket events")
@@ -584,7 +610,9 @@ class EventSyncService:
         close_after: Optional[str] = None,
         close_before: Optional[str] = None,
         volume_min: Optional[float] = None,
-        liquidity_min: Optional[float] = None
+        volume_max: Optional[float] = None,
+        liquidity_min: Optional[float] = None,
+        liquidity_max: Optional[float] = None
     ) -> Dict[str, List[Event]]:
         """Sync events from all exchanges in parallel, with optional filtering"""
         results = {
@@ -599,7 +627,11 @@ class EventSyncService:
                     self.sync_kalshi_events,
                     kalshi_tag_slugs,
                     close_after,
-                    close_before
+                    close_before,
+                    volume_min,
+                    volume_max,
+                    liquidity_min,
+                    liquidity_max
                 ): 'kalshi',
                 executor.submit(
                     self.sync_polymarket_events,
@@ -607,7 +639,9 @@ class EventSyncService:
                     close_after,
                     close_before,
                     volume_min,
-                    liquidity_min
+                    volume_max,
+                    liquidity_min,
+                    liquidity_max
                 ): 'polymarket'
             }
 

@@ -138,7 +138,9 @@ class PolymarketClient:
         end_date_min: str = None,
         end_date_max: str = None,
         volume_min: float = None,
+        volume_max: float = None,
         liquidity_min: float = None,
+        liquidity_max: float = None,
         order: str = None
     ) -> list:
         """Get events from Gamma API with optional filtering"""
@@ -146,7 +148,11 @@ class PolymarketClient:
             'limit': limit,
             'offset': offset,
             'active': str(active).lower(),
-            'closed': str(closed).lower()
+            'closed': str(closed).lower(),
+            # Exclude unused data to reduce response size
+            'related_tags': 'false',
+            'include_chat': 'false',
+            'include_template': 'false'
         }
         if tag_id is not None:
             params['tag_id'] = tag_id
@@ -158,8 +164,12 @@ class PolymarketClient:
             params['end_date_max'] = end_date_max
         if volume_min is not None:
             params['volume_min'] = volume_min
+        if volume_max is not None:
+            params['volume_max'] = volume_max
         if liquidity_min is not None:
             params['liquidity_min'] = liquidity_min
+        if liquidity_max is not None:
+            params['liquidity_max'] = liquidity_max
         if order is not None:
             params['order'] = order
 
@@ -243,7 +253,9 @@ class PolymarketClient:
         end_date_min: str = None,
         end_date_max: str = None,
         volume_min: float = None,
-        liquidity_min: float = None
+        volume_max: float = None,
+        liquidity_min: float = None,
+        liquidity_max: float = None
     ) -> list:
         """Fetch all active events with offset-based pagination and optional filtering"""
         all_events = []
@@ -261,7 +273,9 @@ class PolymarketClient:
                     end_date_min=end_date_min,
                     end_date_max=end_date_max,
                     volume_min=volume_min,
-                    liquidity_min=liquidity_min
+                    volume_max=volume_max,
+                    liquidity_min=liquidity_min,
+                    liquidity_max=liquidity_max
                 )
             except Exception as e:
                 logger.error(f"Failed to fetch events at offset {offset}: {e}")

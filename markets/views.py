@@ -162,7 +162,9 @@ def sync_events(request):
             close_after = None
             close_before = None
             volume_min = None
+            volume_max = None
             liquidity_min = None
+            liquidity_max = None
 
             if request.body:
                 try:
@@ -184,8 +186,12 @@ def sync_events(request):
                     # Volume/liquidity filters
                     if data.get('volume_min'):
                         volume_min = float(data.get('volume_min'))
+                    if data.get('volume_max'):
+                        volume_max = float(data.get('volume_max'))
                     if data.get('liquidity_min'):
                         liquidity_min = float(data.get('liquidity_min'))
+                    if data.get('liquidity_max'):
+                        liquidity_max = float(data.get('liquidity_max'))
                 except (json.JSONDecodeError, ValueError):
                     pass
 
@@ -195,7 +201,9 @@ def sync_events(request):
                 close_after=close_after,
                 close_before=close_before,
                 volume_min=volume_min,
-                liquidity_min=liquidity_min
+                volume_max=volume_max,
+                liquidity_min=liquidity_min,
+                liquidity_max=liquidity_max
             )
 
             return JsonResponse({
