@@ -19,113 +19,6 @@
     </div>
 </div>
 
-<!-- Tag Selection Section -->
-<div class="section-header">
-    <h2>Tag Selection</h2>
-    <button class="btn" onclick="refreshTags()" id="refreshTagsBtn">
-        Refresh Tags from API
-        <span class="loading" id="refreshTagsLoading">...</span>
-    </button>
-</div>
-<p class="section-description">Select tags to filter events when syncing. Leave empty to fetch all events.</p>
-
-<div class="tag-filters">
-    <div class="tag-filter-section">
-        <div class="tag-section-header">
-            <h3>Kalshi Tags</h3>
-        </div>
-        <div class="add-tag-form">
-            <input type="text" id="kalshiTagInput" placeholder="New tag label..." class="tag-input">
-            <input type="text" id="kalshiCategoryInput" placeholder="Category (optional)" class="tag-input category-input">
-            <button class="btn-small" onclick="addTag('kalshi')">+ Add</button>
-        </div>
-        <div class="tag-select-container" id="kalshiTagsContainer">
-            <div class="tag-checkboxes" id="kalshiTags">
-                {% if kalshi_tags_by_category %}
-                    {% for category, tags in kalshi_tags_by_category.items %}
-                    <div class="tag-category">
-                        <span class="category-label">{{ category }}</span>
-                        <div class="category-tags">
-                            {% for tag in tags %}
-                            <label class="tag-checkbox">
-                                <input type="checkbox" name="kalshi_tag" value="{{ tag.slug }}" data-label="{{ tag.label }}" data-tag-id="{{ tag.id }}">
-                                <span class="tag-label">{{ tag.label }}</span>
-                                <button class="tag-delete-btn" onclick="event.preventDefault(); deleteTag({{ tag.id }}, '{{ tag.label|escapejs }}')" title="Delete tag">&times;</button>
-                            </label>
-                            {% endfor %}
-                        </div>
-                    </div>
-                    {% endfor %}
-                {% else %}
-                    <span class="no-tags">No tags available. Click "Refresh Tags from API" to fetch them.</span>
-                {% endif %}
-            </div>
-        </div>
-    </div>
-    <div class="tag-filter-section">
-        <div class="tag-section-header">
-            <h3>Polymarket Tags</h3>
-        </div>
-        <div class="add-tag-form">
-            <input type="text" id="polymarketTagInput" placeholder="Tag slug (e.g. crypto)..." class="tag-input">
-            <button class="btn-small" onclick="addTag('polymarket')">+ Add</button>
-        </div>
-        <div class="tag-select-container" id="polymarketTagsContainer">
-            <div class="tag-checkboxes" id="polymarketTags">
-                {% if polymarket_tags %}
-                <div class="category-tags">
-                    {% for tag in polymarket_tags %}
-                    <label class="tag-checkbox">
-                        <input type="checkbox" name="polymarket_tag" value="{{ tag.external_id }}" data-label="{{ tag.label }}" data-tag-id="{{ tag.id }}">
-                        <span class="tag-label">{{ tag.label }}</span>
-                        <button class="tag-delete-btn" onclick="event.preventDefault(); deleteTag({{ tag.id }}, '{{ tag.label|escapejs }}')" title="Delete tag">&times;</button>
-                    </label>
-                    {% endfor %}
-                </div>
-                {% else %}
-                    <span class="no-tags">No tags available. Click "Refresh Tags from API" to fetch them.</span>
-                {% endif %}
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Manual Tag Match Section -->
-<div class="manual-match-section">
-    <button class="btn" onclick="createManualTagMatch()" id="manualMatchBtn">
-        Create Manual Tag Match
-        <span class="loading" id="manualMatchLoading">...</span>
-    </button>
-    <span class="help-text">Select one tag from Kalshi and one from Polymarket above, then click to create a match</span>
-</div>
-
-<!-- Matched Tags Section -->
-<div class="section-header">
-    <h2>Matched Tags</h2>
-    <span class="page-info">{{ tag_match_count }} matches</span>
-</div>
-
-<div class="matched-tags-section">
-    {% if tag_matches %}
-    <div class="matched-tags-container">
-        <div class="matched-tags-list">
-            {% for match in tag_matches %}
-            <div class="tag-match-item {% if match.is_manual %}manual-match{% endif %}">
-                <span class="tag-badge kalshi">{{ match.kalshi_tag.label }}</span>
-                <span class="match-arrow">&harr;</span>
-                <span class="tag-badge polymarket">{{ match.polymarket_tag.label }}</span>
-                <button class="tag-delete-btn" onclick="deleteTagMatch({{ match.id }})" title="Delete match">&times;</button>
-            </div>
-            {% endfor %}
-        </div>
-    </div>
-    {% else %}
-    <div class="empty-state">
-        <p>No tag matches found. Select one Kalshi and one Polymarket tag and click "Create Manual Tag Match".</p>
-    </div>
-    {% endif %}
-</div>
-
 <!-- Event Sync Section -->
 <div class="section-header">
     <h2>Event Sync</h2>
@@ -138,29 +31,7 @@
             <label for="closeAfterDate">Closes After:</label>
             <input type="date" id="closeAfterDate" class="date-input">
         </div>
-        <div class="date-input-group">
-            <label for="closeBeforeDate">Closes Before:</label>
-            <input type="date" id="closeBeforeDate" class="date-input">
-        </div>
-    </div>
-    <div class="date-filters" style="margin-top: 12px;">
-        <div class="date-input-group">
-            <label for="syncVolumeMin">Min Volume ($):</label>
-            <input type="number" id="syncVolumeMin" class="filter-input" placeholder="0" min="0">
-        </div>
-        <div class="date-input-group">
-            <label for="syncVolumeMax">Max Volume ($):</label>
-            <input type="number" id="syncVolumeMax" class="filter-input" placeholder="No limit" min="0">
-        </div>
-        <div class="date-input-group">
-            <label for="syncLiquidityMin">Min Liquidity ($):</label>
-            <input type="number" id="syncLiquidityMin" class="filter-input" placeholder="0" min="0">
-        </div>
-        <div class="date-input-group">
-            <label for="syncLiquidityMax">Max Liquidity ($):</label>
-            <input type="number" id="syncLiquidityMax" class="filter-input" placeholder="No limit" min="0">
-        </div>
-        <button class="btn-small" onclick="clearSyncFilters()">Clear All</button>
+        <button class="btn-small" onclick="clearSyncFilters()">Clear</button>
     </div>
 </div>
 
@@ -168,10 +39,6 @@
     <button class="btn primary" onclick="syncEvents()" id="syncBtn">
         Sync Events
         <span class="loading" id="syncLoading">...</span>
-    </button>
-    <button class="btn secondary" onclick="syncFromMatchedTags()" id="syncMatchedBtn">
-        Sync from Matched Tags
-        <span class="loading" id="syncMatchedLoading">...</span>
     </button>
 </div>
 
@@ -201,7 +68,7 @@
                 </div>
             </div>
             {% empty %}
-            <p class="no-tags">No Kalshi events synced yet. Click "Sync Events" to fetch them.</p>
+            <p class="no-events">No Kalshi events synced yet. Click "Sync Events" to fetch them.</p>
             {% endfor %}
         </div>
     </div>
@@ -224,7 +91,7 @@
                 </div>
             </div>
             {% empty %}
-            <p class="no-tags">No Polymarket events synced yet. Click "Sync Events" to fetch them.</p>
+            <p class="no-events">No Polymarket events synced yet. Click "Sync Events" to fetch them.</p>
             {% endfor %}
         </div>
     </div>
@@ -236,32 +103,6 @@
         <span class="loading" id="createEventMatchLoading">...</span>
     </button>
     <span class="help-text" id="selectedEventsInfo">Select one event from each exchange</span>
-</div>
-
-<!-- Event Matching Section -->
-<div class="section-header">
-    <h2>Event Matching</h2>
-</div>
-<p class="section-description">Semantically match events based on filter criteria.</p>
-
-<div class="match-filter-section">
-    <div class="match-filters">
-        <div class="filter-input-group">
-            <label for="volumeMin">Min Volume ($):</label>
-            <input type="number" id="volumeMin" class="filter-input" placeholder="0">
-        </div>
-        <div class="filter-input-group">
-            <label for="liquidityMin">Min Liquidity ($):</label>
-            <input type="number" id="liquidityMin" class="filter-input" placeholder="0">
-        </div>
-    </div>
-</div>
-
-<div class="action-buttons">
-    <button class="btn primary" onclick="refreshEventMatches()" id="refreshMatchesBtn">
-        Refresh Opportunities
-        <span class="loading" id="refreshMatchesLoading">...</span>
-    </button>
 </div>
 
 <!-- Event Matches Table -->
@@ -353,7 +194,7 @@
 {% else %}
 <div class="empty-state">
     <p>No event matches found.</p>
-    <p>Sync events first, then click "Refresh Opportunities" to find matches.</p>
+    <p>Sync events first, then select one event from each exchange and click "Create Event Match".</p>
 </div>
 {% endif %}
 
@@ -451,35 +292,6 @@
         border-radius: 8px;
     }
 
-    .match-filter-section {
-        margin: 16px 0;
-    }
-
-    .match-filters {
-        display: flex;
-        gap: 20px;
-    }
-
-    .filter-input-group {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-    }
-
-    .filter-input-group label {
-        color: #888;
-        font-size: 14px;
-    }
-
-    .filter-input {
-        padding: 8px 12px;
-        background: #2a2a2a;
-        border: 1px solid #333;
-        border-radius: 4px;
-        color: #fff;
-        width: 120px;
-    }
-
     .event-cell {
         max-width: 300px;
     }
@@ -513,24 +325,9 @@
         white-space: nowrap;
     }
 
-    .matched-tags-list {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-    }
-
-    .tag-match-item {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        background: #222;
-        border-radius: 4px;
-        padding: 6px 10px;
-        font-size: 13px;
-    }
-
-    .tag-match-item .match-arrow {
+    .no-events {
         color: #666;
+        font-style: italic;
     }
 
     @media (max-width: 900px) {
@@ -715,180 +512,8 @@
         }
     }
 
-    // Refresh event matches
-    async function refreshEventMatches() {
-        const btn = document.getElementById('refreshMatchesBtn');
-        const loading = document.getElementById('refreshMatchesLoading');
-
-        btn.disabled = true;
-        loading.style.display = 'inline';
-
-        const volumeMin = document.getElementById('volumeMin').value;
-        const liquidityMin = document.getElementById('liquidityMin').value;
-
-        try {
-            const response = await fetch('/api/refresh/', {
-                method: 'POST',
-                headers: {
-                    'X-CSRFToken': getCookie('csrftoken'),
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    volume_min: volumeMin || null,
-                    liquidity_min: liquidityMin || null
-                })
-            });
-
-            const data = await response.json();
-
-            if (data.success) {
-                showToast(`Found ${data.matches_found} matches`);
-                setTimeout(() => location.reload(), 1000);
-            } else {
-                showToast('Error: ' + data.error, 'error');
-            }
-        } catch (e) {
-            showToast('Network error: ' + e.message, 'error');
-        } finally {
-            btn.disabled = false;
-            loading.style.display = 'none';
-        }
-    }
-
-    async function refreshTags() {
-        const btn = document.getElementById('refreshTagsBtn');
-        const loading = document.getElementById('refreshTagsLoading');
-
-        btn.disabled = true;
-        loading.style.display = 'inline';
-
-        try {
-            const response = await fetch('{% url "markets:refresh_tags" %}', {
-                method: 'POST',
-                headers: {
-                    'X-CSRFToken': getCookie('csrftoken'),
-                }
-            });
-
-            const data = await response.json();
-
-            if (data.success) {
-                showToast(`Synced ${data.kalshi_synced} Kalshi tags, ${data.polymarket_synced} Polymarket tags`);
-                setTimeout(() => location.reload(), 1000);
-            } else {
-                showToast('Error: ' + data.error, 'error');
-            }
-        } catch (e) {
-            showToast('Network error: ' + e.message, 'error');
-        } finally {
-            btn.disabled = false;
-            loading.style.display = 'none';
-        }
-    }
-
-    async function createManualTagMatch() {
-        const btn = document.getElementById('manualMatchBtn');
-        const loading = document.getElementById('manualMatchLoading');
-
-        const kalshiChecked = document.querySelectorAll('input[name="kalshi_tag"]:checked');
-        const polyChecked = document.querySelectorAll('input[name="polymarket_tag"]:checked');
-
-        if (kalshiChecked.length !== 1 || polyChecked.length !== 1) {
-            showToast('Please select exactly one Kalshi tag and one Polymarket tag to create a match.', 'error');
-            return;
-        }
-
-        const kalshiTagId = kalshiChecked[0].dataset.tagId;
-        const polymarketTagId = polyChecked[0].dataset.tagId;
-
-        btn.disabled = true;
-        loading.style.display = 'inline';
-
-        try {
-            const response = await fetch('{% url "markets:create_tag_match" %}', {
-                method: 'POST',
-                headers: {
-                    'X-CSRFToken': getCookie('csrftoken'),
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    kalshi_tag_id: parseInt(kalshiTagId),
-                    polymarket_tag_id: parseInt(polymarketTagId)
-                })
-            });
-
-            const data = await response.json();
-
-            if (data.success) {
-                showToast('Tag match created');
-                setTimeout(() => location.reload(), 500);
-            } else {
-                showToast('Error: ' + data.error, 'error');
-            }
-        } catch (e) {
-            showToast('Network error: ' + e.message, 'error');
-        } finally {
-            btn.disabled = false;
-            loading.style.display = 'none';
-        }
-    }
-
-    async function deleteTagMatch(matchId) {
-        if (!confirm('Delete this tag match?')) return;
-
-        try {
-            const response = await fetch(`/api/tag-matches/${matchId}/delete/`, {
-                method: 'POST',
-                headers: {
-                    'X-CSRFToken': getCookie('csrftoken'),
-                }
-            });
-
-            const data = await response.json();
-
-            if (data.success) {
-                showToast('Tag match deleted');
-                setTimeout(() => location.reload(), 500);
-            } else {
-                showToast('Error: ' + data.error, 'error');
-            }
-        } catch (e) {
-            showToast('Network error: ' + e.message, 'error');
-        }
-    }
-
-    function getSelectedTags() {
-        const kalshiTags = [];
-        const polymarketTags = [];
-
-        document.querySelectorAll('input[name="kalshi_tag"]:checked').forEach(cb => {
-            kalshiTags.push(cb.value);
-        });
-
-        document.querySelectorAll('input[name="polymarket_tag"]:checked').forEach(cb => {
-            polymarketTags.push(cb.value);
-        });
-
-        return { kalshiTags, polymarketTags };
-    }
-
-    function getSyncFilters() {
-        const closeAfter = document.getElementById('closeAfterDate').value;
-        const closeBefore = document.getElementById('closeBeforeDate').value;
-        const volumeMin = document.getElementById('syncVolumeMin').value;
-        const volumeMax = document.getElementById('syncVolumeMax').value;
-        const liquidityMin = document.getElementById('syncLiquidityMin').value;
-        const liquidityMax = document.getElementById('syncLiquidityMax').value;
-        return { closeAfter, closeBefore, volumeMin, volumeMax, liquidityMin, liquidityMax };
-    }
-
     function clearSyncFilters() {
         document.getElementById('closeAfterDate').value = '';
-        document.getElementById('closeBeforeDate').value = '';
-        document.getElementById('syncVolumeMin').value = '';
-        document.getElementById('syncVolumeMax').value = '';
-        document.getElementById('syncLiquidityMin').value = '';
-        document.getElementById('syncLiquidityMax').value = '';
     }
 
     async function syncEvents() {
@@ -899,33 +524,11 @@
         loading.style.display = 'inline';
 
         try {
-            const { kalshiTags, polymarketTags } = getSelectedTags();
-            const { closeAfter, closeBefore, volumeMin, volumeMax, liquidityMin, liquidityMax } = getSyncFilters();
+            const closeAfter = document.getElementById('closeAfterDate').value;
 
             const body = {};
-            if (kalshiTags.length > 0) {
-                body.kalshi_tags = kalshiTags;
-            }
-            if (polymarketTags.length > 0) {
-                body.polymarket_tags = polymarketTags;
-            }
             if (closeAfter) {
                 body.close_after = closeAfter;
-            }
-            if (closeBefore) {
-                body.close_before = closeBefore;
-            }
-            if (volumeMin) {
-                body.volume_min = volumeMin;
-            }
-            if (volumeMax) {
-                body.volume_max = volumeMax;
-            }
-            if (liquidityMin) {
-                body.liquidity_min = liquidityMin;
-            }
-            if (liquidityMax) {
-                body.liquidity_max = liquidityMax;
             }
 
             const response = await fetch('{% url "markets:sync_markets" %}', {
@@ -950,144 +553,6 @@
         } finally {
             btn.disabled = false;
             loading.style.display = 'none';
-        }
-    }
-
-    async function syncFromMatchedTags() {
-        const btn = document.getElementById('syncMatchedBtn');
-        const loading = document.getElementById('syncMatchedLoading');
-
-        // Get all matched tags
-        const kalshiTags = [];
-        const polyTags = [];
-
-        {% for match in tag_matches %}
-            kalshiTags.push('{{ match.kalshi_tag.slug }}');
-            polyTags.push('{{ match.polymarket_tag.external_id }}');
-        {% endfor %}
-
-        if (kalshiTags.length === 0 && polyTags.length === 0) {
-            showToast('No matched tags available. Create tag matches first.', 'error');
-            return;
-        }
-
-        btn.disabled = true;
-        loading.style.display = 'inline';
-
-        try {
-            const { closeAfter, closeBefore, volumeMin, volumeMax, liquidityMin, liquidityMax } = getSyncFilters();
-
-            const body = {
-                kalshi_tags: kalshiTags,
-                polymarket_tags: polyTags
-            };
-            if (closeAfter) {
-                body.close_after = closeAfter;
-            }
-            if (closeBefore) {
-                body.close_before = closeBefore;
-            }
-            if (volumeMin) {
-                body.volume_min = volumeMin;
-            }
-            if (volumeMax) {
-                body.volume_max = volumeMax;
-            }
-            if (liquidityMin) {
-                body.liquidity_min = liquidityMin;
-            }
-            if (liquidityMax) {
-                body.liquidity_max = liquidityMax;
-            }
-
-            const response = await fetch('{% url "markets:sync_markets" %}', {
-                method: 'POST',
-                headers: {
-                    'X-CSRFToken': getCookie('csrftoken'),
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(body)
-            });
-
-            const data = await response.json();
-
-            if (data.success) {
-                showToast(`Synced from matched tags: ${data.kalshi_synced} Kalshi, ${data.polymarket_synced} Polymarket events`);
-                setTimeout(() => location.reload(), 1500);
-            } else {
-                showToast('Error: ' + data.error, 'error');
-            }
-        } catch (e) {
-            showToast('Network error: ' + e.message, 'error');
-        } finally {
-            btn.disabled = false;
-            loading.style.display = 'none';
-        }
-    }
-
-    async function addTag(exchange) {
-        let label, category = '';
-
-        if (exchange === 'kalshi') {
-            label = document.getElementById('kalshiTagInput').value.trim();
-            category = document.getElementById('kalshiCategoryInput').value.trim();
-        } else {
-            label = document.getElementById('polymarketTagInput').value.trim();
-        }
-
-        if (!label) {
-            showToast('Please enter a tag label.', 'error');
-            return;
-        }
-
-        try {
-            const response = await fetch('{% url "markets:create_tag" %}', {
-                method: 'POST',
-                headers: {
-                    'X-CSRFToken': getCookie('csrftoken'),
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    exchange: exchange,
-                    label: label,
-                    category: category
-                })
-            });
-
-            const data = await response.json();
-
-            if (data.success) {
-                showToast(`Tag "${label}" created`);
-                setTimeout(() => location.reload(), 500);
-            } else {
-                showToast('Error: ' + data.error, 'error');
-            }
-        } catch (e) {
-            showToast('Network error: ' + e.message, 'error');
-        }
-    }
-
-    async function deleteTag(tagId, tagLabel) {
-        if (!confirm(`Delete the tag "${tagLabel}"?`)) return;
-
-        try {
-            const response = await fetch(`/api/tags/${tagId}/delete/`, {
-                method: 'POST',
-                headers: {
-                    'X-CSRFToken': getCookie('csrftoken'),
-                }
-            });
-
-            const data = await response.json();
-
-            if (data.success) {
-                showToast(data.message);
-                setTimeout(() => location.reload(), 500);
-            } else {
-                showToast('Error: ' + data.error, 'error');
-            }
-        } catch (e) {
-            showToast('Network error: ' + e.message, 'error');
         }
     }
 </script>
