@@ -600,7 +600,3 @@ class EventSyncService:
                     logger.error(f"{exchange} sync failed: {e}")
 
         return results
-
-
-# Keep MarketSyncService as an alias for backwards compatibility
-MarketSyncService = EventSyncService

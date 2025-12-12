@@ -1,4 +1,3 @@
-from .arbitrage import ArbitrageDetector
-from .sync import EventSyncService, MarketSyncService
+from .sync import EventSyncService
 
-__all__ = ['ArbitrageDetector', 'EventSyncService', 'MarketSyncService']
+__all__ = ['EventSyncService']
