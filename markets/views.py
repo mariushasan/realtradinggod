@@ -12,6 +12,23 @@ from .models import Event, EventMatch, Exchange
 from .services import EventSyncService
 
 
+def serialize_event(event, include_exchange=False):
+    """Serialize an Event model instance to a dictionary"""
+    data = {
+        'id': event.id,
+        'external_id': event.external_id,
+        'title': event.title,
+        'url': event.url,
+        'volume': event.volume,
+        'liquidity': event.liquidity,
+        'category': event.category,
+        'end_date': event.end_date.isoformat() if event.end_date else None,
+    }
+    if include_exchange:
+        data['exchange'] = event.exchange
+    return data
+
+
 class DashboardView(View):
     """Main dashboard showing events and matches"""
     ITEMS_PER_PAGE = 50
@@ -26,52 +43,15 @@ class DashboardView(View):
         kalshi_events = Event.objects.filter(exchange=Exchange.KALSHI, is_active=True).order_by('-updated_at')[:100]
         poly_events = Event.objects.filter(exchange=Exchange.POLYMARKET, is_active=True).order_by('-updated_at')[:100]
 
-        # Format events for template
-        kalshi_events_list = [
-            {
-                'id': e.id,
-                'external_id': e.external_id,
-                'title': e.title,
-                'url': e.url,
-                'volume': e.volume,
-                'liquidity': e.liquidity,
-                'category': e.category,
-                'end_date': e.end_date.isoformat() if e.end_date else None,
-            }
-            for e in kalshi_events
-        ]
-
-        poly_events_list = [
-            {
-                'id': e.id,
-                'external_id': e.external_id,
-                'title': e.title,
-                'url': e.url,
-                'volume': e.volume,
-                'liquidity': e.liquidity,
-                'category': e.category,
-                'end_date': e.end_date.isoformat() if e.end_date else None,
-            }
-            for e in poly_events
-        ]
-
         # Get event matches with pagination
         sort = request.GET.get('sort', '-similarity_score')
-        valid_sorts = [
-            'similarity_score', '-similarity_score',
-            'is_verified', '-is_verified',
-            'created_at', '-created_at'
-        ]
+        valid_sorts = ['similarity_score', '-similarity_score', 'is_verified', '-is_verified', 'created_at', '-created_at']
         if sort not in valid_sorts:
             sort = '-similarity_score'
 
         page = request.GET.get('page', 1)
+        event_matches = EventMatch.objects.select_related('kalshi_event', 'polymarket_event').order_by(sort)
 
-        event_matches = EventMatch.objects.select_related(
-            'kalshi_event', 'polymarket_event'
-        ).order_by(sort)
-
-        # Pagination
         paginator = Paginator(event_matches, self.ITEMS_PER_PAGE)
         try:
             event_matches_page = paginator.page(page)
@@ -84,8 +64,8 @@ class DashboardView(View):
             'kalshi_event_count': kalshi_event_count,
             'poly_event_count': poly_event_count,
             'event_match_count': event_match_count,
-            'kalshi_events': kalshi_events_list,
-            'poly_events': poly_events_list,
+            'kalshi_events': [serialize_event(e) for e in kalshi_events],
+            'poly_events': [serialize_event(e) for e in poly_events],
             'event_matches': event_matches_page,
             'total_event_matches': paginator.count,
             'current_sort': sort,
@@ -97,205 +77,145 @@ class DashboardView(View):
 @csrf_exempt
 def sync_events(request):
     """Sync events from exchanges with optional date filtering"""
-    if request.method == 'POST':
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    try:
+        close_after = None
+        if request.body:
+            try:
+                data = json.loads(request.body)
+                close_after = data.get('close_after')
+            except (json.JSONDecodeError, ValueError):
+                pass
+
         sync_service = EventSyncService()
+        results = sync_service.sync_all_events(close_after=close_after)
 
-        try:
-            close_after = None
+        return JsonResponse({
+            'success': True,
+            'kalshi_synced': len(results['kalshi']),
+            'polymarket_synced': len(results['polymarket']),
+        })
 
-            if request.body:
-                try:
-                    data = json.loads(request.body)
-                    # Only close_after filter is supported
-                    close_after = data.get('close_after')
-                except (json.JSONDecodeError, ValueError):
-                    pass
-
-            results = sync_service.sync_all_events(
-                close_after=close_after
-            )
-
-            return JsonResponse({
-                'success': True,
-                'kalshi_synced': len(results['kalshi']),
-                'polymarket_synced': len(results['polymarket']),
-            })
-
-        except Exception as e:
-            return JsonResponse({
-                'success': False,
-                'error': str(e)
-            }, status=500)
-
-    return JsonResponse({'error': 'POST required'}, status=405)
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)}, status=500)
 
 
 @csrf_exempt
 def get_events(request):
     """Get events from database with optional search"""
-    if request.method == 'GET':
-        try:
-            exchange = request.GET.get('exchange')
-            search = request.GET.get('search', '').strip()
-            limit = int(request.GET.get('limit', 100))
+    if request.method != 'GET':
+        return JsonResponse({'error': 'GET required'}, status=405)
 
-            events_qs = Event.objects.filter(is_active=True)
+    try:
+        exchange = request.GET.get('exchange')
+        search = request.GET.get('search', '').strip()
+        limit = int(request.GET.get('limit', 100))
 
-            if exchange:
-                events_qs = events_qs.filter(exchange=exchange)
+        events_qs = Event.objects.filter(is_active=True)
 
-            if search:
-                events_qs = events_qs.filter(
-                    Q(title__icontains=search) | Q(description__icontains=search)
-                )
+        if exchange:
+            events_qs = events_qs.filter(exchange=exchange)
 
-            events_qs = events_qs.order_by('-updated_at')[:limit]
+        if search:
+            events_qs = events_qs.filter(Q(title__icontains=search) | Q(description__icontains=search))
 
-            events_list = [
-                {
-                    'id': e.id,
-                    'exchange': e.exchange,
-                    'external_id': e.external_id,
-                    'title': e.title,
-                    'url': e.url,
-                    'volume': e.volume,
-                    'liquidity': e.liquidity,
-                    'category': e.category,
-                    'end_date': e.end_date.isoformat() if e.end_date else None,
-                }
-                for e in events_qs
-            ]
+        events_qs = events_qs.order_by('-updated_at')[:limit]
 
-            return JsonResponse({
-                'success': True,
-                'events': events_list
-            })
+        return JsonResponse({
+            'success': True,
+            'events': [serialize_event(e, include_exchange=True) for e in events_qs]
+        })
 
-        except Exception as e:
-            return JsonResponse({
-                'success': False,
-                'error': str(e)
-            }, status=500)
-
-    return JsonResponse({'error': 'GET required'}, status=405)
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)}, status=500)
 
 
 @csrf_exempt
 def create_event_match(request):
     """Create a manual event match between a Kalshi event and a Polymarket event"""
-    if request.method == 'POST':
-        try:
-            data = json.loads(request.body)
-            kalshi_event_id = data.get('kalshi_event_id')
-            polymarket_event_id = data.get('polymarket_event_id')
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
 
-            if not kalshi_event_id or not polymarket_event_id:
-                return JsonResponse({
-                    'success': False,
-                    'error': 'Both kalshi_event_id and polymarket_event_id are required'
-                }, status=400)
+    try:
+        data = json.loads(request.body)
+        kalshi_event_id = data.get('kalshi_event_id')
+        polymarket_event_id = data.get('polymarket_event_id')
 
-            # Get the events
-            try:
-                kalshi_event = Event.objects.get(id=kalshi_event_id, exchange=Exchange.KALSHI)
-            except Event.DoesNotExist:
-                return JsonResponse({
-                    'success': False,
-                    'error': f'Kalshi event with id {kalshi_event_id} not found'
-                }, status=404)
-
-            try:
-                polymarket_event = Event.objects.get(id=polymarket_event_id, exchange=Exchange.POLYMARKET)
-            except Event.DoesNotExist:
-                return JsonResponse({
-                    'success': False,
-                    'error': f'Polymarket event with id {polymarket_event_id} not found'
-                }, status=404)
-
-            # Create or update the event match
-            event_match, created = EventMatch.objects.update_or_create(
-                kalshi_event=kalshi_event,
-                polymarket_event=polymarket_event,
-                defaults={
-                    'similarity_score': 1.0,
-                    'match_reason': "Manual match",
-                }
-            )
-
-            return JsonResponse({
-                'success': True,
-                'created': created,
-                'event_match': {
-                    'id': event_match.id,
-                    'kalshi_event': {
-                        'id': kalshi_event.id,
-                        'title': kalshi_event.title,
-                        'url': kalshi_event.url,
-                    },
-                    'polymarket_event': {
-                        'id': polymarket_event.id,
-                        'title': polymarket_event.title,
-                        'url': polymarket_event.url,
-                    },
-                    'similarity_score': event_match.similarity_score,
-                    'match_reason': event_match.match_reason,
-                }
-            })
-
-        except json.JSONDecodeError:
+        if not kalshi_event_id or not polymarket_event_id:
             return JsonResponse({
                 'success': False,
-                'error': 'Invalid JSON in request body'
+                'error': 'Both kalshi_event_id and polymarket_event_id are required'
             }, status=400)
-        except Exception as e:
+
+        try:
+            kalshi_event = Event.objects.get(id=kalshi_event_id, exchange=Exchange.KALSHI)
+        except Event.DoesNotExist:
             return JsonResponse({
                 'success': False,
-                'error': str(e)
-            }, status=500)
+                'error': f'Kalshi event with id {kalshi_event_id} not found'
+            }, status=404)
 
-    return JsonResponse({'error': 'POST required'}, status=405)
+        try:
+            polymarket_event = Event.objects.get(id=polymarket_event_id, exchange=Exchange.POLYMARKET)
+        except Event.DoesNotExist:
+            return JsonResponse({
+                'success': False,
+                'error': f'Polymarket event with id {polymarket_event_id} not found'
+            }, status=404)
+
+        event_match, created = EventMatch.objects.update_or_create(
+            kalshi_event=kalshi_event,
+            polymarket_event=polymarket_event,
+            defaults={'similarity_score': 1.0, 'match_reason': "Manual match"}
+        )
+
+        return JsonResponse({
+            'success': True,
+            'created': created,
+            'event_match': {
+                'id': event_match.id,
+                'kalshi_event': {'id': kalshi_event.id, 'title': kalshi_event.title, 'url': kalshi_event.url},
+                'polymarket_event': {'id': polymarket_event.id, 'title': polymarket_event.title, 'url': polymarket_event.url},
+                'similarity_score': event_match.similarity_score,
+                'match_reason': event_match.match_reason,
+            }
+        })
+
+    except json.JSONDecodeError:
+        return JsonResponse({'success': False, 'error': 'Invalid JSON in request body'}, status=400)
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)}, status=500)
 
 
 @csrf_exempt
 def delete_event_match(request, match_id):
     """Delete an event match"""
-    if request.method == 'DELETE' or request.method == 'POST':
-        try:
-            event_match = get_object_or_404(EventMatch, id=match_id)
-            event_match.delete()
+    if request.method not in ('DELETE', 'POST'):
+        return JsonResponse({'error': 'DELETE or POST required'}, status=405)
 
-            return JsonResponse({
-                'success': True,
-                'message': f'Event match {match_id} deleted'
-            })
-
-        except Exception as e:
-            return JsonResponse({
-                'success': False,
-                'error': str(e)
-            }, status=500)
-
-    return JsonResponse({'error': 'DELETE or POST required'}, status=405)
+    try:
+        event_match = get_object_or_404(EventMatch, id=match_id)
+        event_match.delete()
+        return JsonResponse({'success': True, 'message': f'Event match {match_id} deleted'})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)}, status=500)
 
 
 @csrf_exempt
 def verify_event_match(request, match_id):
     """Verify/unverify an event match"""
-    if request.method == 'POST':
-        match = get_object_or_404(EventMatch, id=match_id)
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
 
-        # Toggle verification
-        match.is_verified = not match.is_verified
-        if match.is_verified:
-            match.verified_at = timezone.now()
-        else:
-            match.verified_at = None
-        match.save()
+    match = get_object_or_404(EventMatch, id=match_id)
+    match.is_verified = not match.is_verified
+    match.verified_at = timezone.now() if match.is_verified else None
+    match.save()
 
-        return JsonResponse({
-            'success': True,
-            'is_verified': match.is_verified,
-            'verified_at': match.verified_at.isoformat() if match.verified_at else None
-        })
-
-    return JsonResponse({'error': 'POST required'}, status=405)
+    return JsonResponse({
+        'success': True,
+        'is_verified': match.is_verified,
+        'verified_at': match.verified_at.isoformat() if match.verified_at else None
+    })

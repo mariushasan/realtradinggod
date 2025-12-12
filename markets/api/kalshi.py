@@ -28,13 +28,11 @@ class KalshiClient:
         private_key_str = private_key_pem or os.environ.get('KALSHI_PRIVATE_KEY', '')
 
         self.private_key = None
-        self._last_request_time = 0.0  # For rate limiting
-        self._current_interval = self.BASE_REQUEST_INTERVAL  # Adaptive interval
-        if private_key_str and len(private_key_str) > 100:  # Valid key should be much longer
+        self._last_request_time = 0.0
+        self._current_interval = self.BASE_REQUEST_INTERVAL
+        if private_key_str and len(private_key_str) > 100:
             try:
-                # Strip quotes if present
                 private_key_str = private_key_str.strip('"\'')
-                # Handle escaped newlines
                 private_key_str = private_key_str.replace('\\n', '\n')
                 self.private_key = serialization.load_pem_private_key(
                     private_key_str.encode('utf-8'),
@@ -81,8 +79,7 @@ class KalshiClient:
         now = time.monotonic()
         elapsed = now - self._last_request_time
         if elapsed < self._current_interval:
-            sleep_time = self._current_interval - elapsed
-            time.sleep(sleep_time)
+            time.sleep(self._current_interval - elapsed)
         self._last_request_time = time.monotonic()
 
     def _backoff(self):
@@ -107,11 +104,7 @@ class KalshiClient:
         url = self.BASE_URL + path
 
         if params:
-            # Build query string
-            query_parts = []
-            for k, v in params.items():
-                if v is not None:
-                    query_parts.append(f"{k}={v}")
+            query_parts = [f"{k}={v}" for k, v in params.items() if v is not None]
             if query_parts:
                 path = path + '?' + '&'.join(query_parts)
                 url = self.BASE_URL + path
@@ -121,25 +114,18 @@ class KalshiClient:
         last_error = None
         for attempt in range(self.MAX_RETRIES):
             try:
-                # Enforce rate limiting before each request attempt
                 self._rate_limit()
                 response = requests.request(method, url, headers=headers, timeout=30)
 
-                # Handle 429 specifically with adaptive backoff
                 if response.status_code == 429:
                     self._backoff()
-                    # Check for Retry-After header
                     retry_after = response.headers.get('Retry-After')
-                    if retry_after:
-                        wait_time = float(retry_after)
-                    else:
-                        wait_time = self._current_interval * (attempt + 1)
+                    wait_time = float(retry_after) if retry_after else self._current_interval * (attempt + 1)
                     logger.warning(f"Kalshi API rate limited (429), waiting {wait_time:.2f}s before retry")
                     time.sleep(wait_time)
                     continue
 
                 response.raise_for_status()
-                # Successful request - slowly recover rate limit
                 self._recover()
                 return response.json()
             except requests.exceptions.RequestException as e:
@@ -172,155 +158,6 @@ class KalshiClient:
         }
         return self._request('GET', '/events', params)
 
-    def get_event(self, event_ticker: str, with_nested_markets: bool = True) -> dict:
-        """Get single event by ticker"""
-        params = {'with_nested_markets': str(with_nested_markets).lower()}
-        return self._request('GET', f'/events/{event_ticker}', params)
-
-    def get_all_open_events(
-        self,
-        series_ticker: str = None,
-        min_close_ts: int = None
-    ) -> list:
-        """Fetch all open events with pagination, with optional filtering"""
-        all_events = []
-        cursor = None
-
-        while True:
-            response = self.get_events(
-                status='open',
-                cursor=cursor,
-                with_nested_markets=True,
-                series_ticker=series_ticker,
-                min_close_ts=min_close_ts
-            )
-            events = response.get('events', [])
-            all_events.extend(events)
-
-            cursor = response.get('cursor')
-            if not cursor or not events:
-                break
-
-            logger.info(f"Fetched {len(events)} Kalshi events (total: {len(all_events)})")
-
-        return all_events
-
-    def get_markets(
-        self,
-        status: str = 'open',
-        limit: int = 200,
-        cursor: str = None,
-        event_ticker: str = None,
-        series_ticker: str = None,
-        min_close_ts: int = None,
-        max_close_ts: int = None
-    ) -> dict:
-        """Get markets from Kalshi with optional date filtering"""
-        params = {
-            'status': status,
-            'limit': limit,
-            'cursor': cursor,
-            'event_ticker': event_ticker,
-            'series_ticker': series_ticker,
-            'min_close_ts': min_close_ts,
-            'max_close_ts': max_close_ts
-        }
-        return self._request('GET', '/markets', params)
-
-    def get_market(self, ticker: str) -> dict:
-        """Get single market by ticker"""
-        return self._request('GET', f'/markets/{ticker}')
-
-    def get_all_open_markets(
-        self,
-        min_close_ts: int = None,
-        max_close_ts: int = None
-    ) -> list:
-        """Fetch all open markets with pagination and optional date filtering"""
-        all_markets = []
-        cursor = None
-
-        while True:
-            response = self.get_markets(
-                status='open',
-                cursor=cursor,
-                min_close_ts=min_close_ts,
-                max_close_ts=max_close_ts
-            )
-            markets = response.get('markets', [])
-            all_markets.extend(markets)
-
-            cursor = response.get('cursor')
-            if not cursor or not markets:
-                break
-
-        return all_markets
-
-    def get_tags_by_categories(self) -> dict:
-        """Get all tags organized by categories"""
-        return self._request('GET', '/search/tags_by_categories')
-
-    def get_series(self, category: str = None, tags: str = None) -> dict:
-        """Get series list, optionally filtered by category or tags"""
-        params = {}
-        if category:
-            params['category'] = category
-        if tags:
-            params['tags'] = tags
-        return self._request('GET', '/series', params if params else None)
-
-    def get_series_tickers_by_tags(self, tag_labels: list) -> list:
-        """
-        Get all series tickers that belong to any of the given tags.
-
-        Args:
-            tag_labels: List of tag labels (exact names as returned by tags API)
-
-        Returns:
-            List of unique series tickers
-        """
-        series_tickers = set()
-        for tag_label in tag_labels:
-            try:
-                response = self.get_series(tags=tag_label)
-                series_list = response.get('series', [])
-                for series in series_list:
-                    ticker = series.get('ticker')
-                    if ticker:
-                        series_tickers.add(ticker)
-                logger.info(f"Found {len(series_list)} series for tag '{tag_label}'")
-            except Exception as e:
-                logger.warning(f"Failed to get series for tag '{tag_label}': {e}")
-        return list(series_tickers)
-
-    def get_markets_by_series(
-        self,
-        series_ticker: str,
-        status: str = 'open',
-        min_close_ts: int = None,
-        max_close_ts: int = None
-    ) -> list:
-        """Get all markets for a specific series with optional date filtering"""
-        all_markets = []
-        cursor = None
-
-        while True:
-            response = self.get_markets(
-                status=status,
-                cursor=cursor,
-                series_ticker=series_ticker,
-                min_close_ts=min_close_ts,
-                max_close_ts=max_close_ts
-            )
-            markets = response.get('markets', [])
-            all_markets.extend(markets)
-
-            cursor = response.get('cursor')
-            if not cursor or not markets:
-                break
-
-        return all_markets
-
     def get_multivariate_events(
         self,
         limit: int = 200,
@@ -329,7 +166,7 @@ class KalshiClient:
         series_ticker: str = None,
         collection_ticker: str = None
     ) -> dict:
-        """Get multivariate events (events with multiple outcome markets like "Who wins election")"""
+        """Get multivariate events (events with multiple outcome markets)"""
         params = {
             'limit': limit,
             'cursor': cursor,
@@ -338,31 +175,3 @@ class KalshiClient:
             'collection_ticker': collection_ticker
         }
         return self._request('GET', '/events/multivariate', params)
-
-    def get_all_multivariate_events(
-        self,
-        series_ticker: str = None,
-        collection_ticker: str = None
-    ) -> list:
-        """Fetch all multivariate events with pagination"""
-        all_events = []
-        cursor = None
-
-        while True:
-            response = self.get_multivariate_events(
-                cursor=cursor,
-                with_nested_markets=True,
-                series_ticker=series_ticker,
-                collection_ticker=collection_ticker
-            )
-            events = response.get('events', [])
-
-            all_events.extend(events)
-
-            cursor = response.get('cursor')
-            if not cursor or not events:
-                break
-
-            logger.info(f"Fetched {len(events)} Kalshi multivariate events (total: {len(all_events)})")
-
-        return all_events

@@ -128,37 +128,3 @@ class EventMatch(models.Model):
 
     def __str__(self):
         return f"EventMatch: {self.kalshi_event.title[:30]} <-> {self.polymarket_event.title[:30]}"
-
-
-class ArbitrageOpportunity(models.Model):
-    """Detected arbitrage opportunity"""
-
-    class ArbitrageType(models.TextChoices):
-        KALSHI_ONLY = 'kalshi_only', 'Kalshi Only'
-        POLYMARKET_ONLY = 'polymarket_only', 'Polymarket Only'
-        CROSS_EXCHANGE = 'cross_exchange', 'Cross Exchange'
-
-    arb_type = models.CharField(max_length=20, choices=ArbitrageType.choices)
-
-    # For single-exchange arbitrage
-    markets = models.ManyToManyField(Market, related_name='arbitrage_opportunities')
-
-    # Arbitrage details - stored as JSON
-    # Format: {"positions": [{"market_id": 1, "outcome": "Yes", "price": 0.45}], "total_cost": 0.95, "guaranteed_return": 1.0}
-    positions = models.JSONField(default=dict)
-
-    # Calculated values
-    profit_percent = models.FloatField()
-    expected_value = models.FloatField()
-
-    # Status
-    is_active = models.BooleanField(default=True)
-
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        ordering = ['-profit_percent', '-updated_at']
-
-    def __str__(self):
-        return f"Arb ({self.arb_type}): {self.profit_percent:.2f}% profit"

@@ -5,8 +5,6 @@ import json
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from django.utils import timezone
-
 from markets.models import Market, Event, Exchange
 from markets.api import KalshiClient, PolymarketClient
 
