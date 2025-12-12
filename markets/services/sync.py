@@ -5,7 +5,7 @@ import json
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from markets.models import Market, Event, Exchange
+from markets.models import Market, Event, Exchange, EventTag
 from markets.api import KalshiClient, PolymarketClient
 
 logger = logging.getLogger(__name__)
@@ -74,7 +74,8 @@ class EventSyncService:
         self,
         events_batch: List[Event],
         market_data_batch: Dict[str, dict],
-        total_events: List[int]
+        total_events: List[int],
+        event_tags_batch: Dict[str, List[str]] = None
     ) -> None:
         """Flush a batch of Kalshi events and their markets to the database"""
         if not events_batch:
@@ -83,6 +84,16 @@ class EventSyncService:
         # Bulk create events and get their IDs
         event_ids = self._bulk_create_events(events_batch, Exchange.KALSHI)
         total_events[0] += len(events_batch)
+
+        # Associate tags with events
+        if event_tags_batch:
+            for event_ticker, tag_names in event_tags_batch.items():
+                event = event_ids.get(event_ticker)
+                if event:
+                    for tag_name in tag_names:
+                        tag = EventTag.get_or_create_normalized(tag_name)
+                        if tag:
+                            tag.events.add(event)
 
         # Create markets for this batch
         markets_to_create = []
@@ -161,7 +172,8 @@ class EventSyncService:
         event_data: dict,
         close_after_dt: Optional[datetime],
         events_batch: List[Event],
-        market_data_batch: Dict[str, dict]
+        market_data_batch: Dict[str, dict],
+        event_tags_batch: Dict[str, List[str]] = None
     ) -> bool:
         """Process a single Kalshi event and add to batch if it passes filters. Returns True if added."""
         # Debug: Save first 5 event_data samples
@@ -238,6 +250,13 @@ class EventSyncService:
             'markets': markets,
             'url': url
         }
+
+        # Extract category as tag
+        if event_tags_batch is not None:
+            category = event_data.get('category', '').strip()
+            if category:
+                event_tags_batch[event_ticker] = [category]
+
         return True
 
     def sync_kalshi_events(
@@ -251,6 +270,7 @@ class EventSyncService:
         total_events = [0]  # Use list to allow modification in nested function
         events_batch = []
         market_data_batch = {}
+        event_tags_batch = {}
         seen_tickers = set()
 
         # Convert date strings to Unix timestamps for Kalshi API
@@ -288,13 +308,14 @@ class EventSyncService:
                         seen_tickers.add(ticker)
                         self._process_kalshi_event(
                             event_data, close_after_dt,
-                            events_batch, market_data_batch
+                            events_batch, market_data_batch, event_tags_batch
                         )
                         # Flush if batch is full
                         if len(events_batch) >= BATCH_SIZE:
-                            self._flush_kalshi_batch(events_batch, market_data_batch, total_events)
+                            self._flush_kalshi_batch(events_batch, market_data_batch, total_events, event_tags_batch)
                             events_batch = []
                             market_data_batch = {}
+                            event_tags_batch = {}
 
                 cursor = response.get('cursor')
                 if not cursor or not events:
@@ -317,14 +338,15 @@ class EventSyncService:
                         seen_tickers.add(ticker)
                         self._process_kalshi_event(
                             event_data, close_after_dt,
-                            events_batch, market_data_batch
+                            events_batch, market_data_batch, event_tags_batch
                         )
 
                         # Flush if batch is full
                         if len(events_batch) >= BATCH_SIZE:
-                            self._flush_kalshi_batch(events_batch, market_data_batch, total_events)
+                            self._flush_kalshi_batch(events_batch, market_data_batch, total_events, event_tags_batch)
                             events_batch = []
                             market_data_batch = {}
+                            event_tags_batch = {}
 
                 cursor = response.get('cursor')
                 if not cursor or not events:
@@ -334,7 +356,7 @@ class EventSyncService:
 
             # Flush any remaining events
             if events_batch:
-                self._flush_kalshi_batch(events_batch, market_data_batch, total_events)
+                self._flush_kalshi_batch(events_batch, market_data_batch, total_events, event_tags_batch)
 
             logger.info(f"Synced {total_events[0]} Kalshi events total")
 
@@ -349,7 +371,8 @@ class EventSyncService:
         self,
         events_batch: List[Event],
         market_data_batch: Dict[str, dict],
-        total_events: List[int]
+        total_events: List[int],
+        event_tags_batch: Dict[str, List[str]] = None
     ) -> None:
         """Flush a batch of Polymarket events and their markets to the database"""
         if not events_batch:
@@ -358,6 +381,16 @@ class EventSyncService:
         # Bulk create events and get their IDs
         event_ids = self._bulk_create_events(events_batch, Exchange.POLYMARKET)
         total_events[0] += len(events_batch)
+
+        # Associate tags with events
+        if event_tags_batch:
+            for external_id, tag_names in event_tags_batch.items():
+                event = event_ids.get(external_id)
+                if event:
+                    for tag_name in tag_names:
+                        tag = EventTag.get_or_create_normalized(tag_name)
+                        if tag:
+                            tag.events.add(event)
 
         # Create markets for this batch
         markets_to_create = []
@@ -459,7 +492,8 @@ class EventSyncService:
         self,
         event_data: dict,
         events_batch: List[Event],
-        market_data_batch: Dict[str, dict]
+        market_data_batch: Dict[str, dict],
+        event_tags_batch: Dict[str, List[str]] = None
     ) -> bool:
         """Process a single Polymarket event and add to batch. Returns True if added."""
         # Debug: Save first 5 event_data samples
@@ -524,6 +558,21 @@ class EventSyncService:
             'slug': slug
         }
 
+        # Extract tags from Polymarket tags array
+        if event_tags_batch is not None:
+            tags = event_data.get('tags', [])
+            if tags:
+                tag_labels = []
+                for tag in tags:
+                    if isinstance(tag, dict):
+                        label = tag.get('label', '').strip()
+                        if label:
+                            tag_labels.append(label)
+                    elif isinstance(tag, str):
+                        tag_labels.append(tag.strip())
+                if tag_labels:
+                    event_tags_batch[external_id] = tag_labels
+
         return True
 
     def sync_polymarket_events(
@@ -537,6 +586,7 @@ class EventSyncService:
         total_events = [0]  # Use list to allow modification in nested function
         events_batch = []
         market_data_batch = {}
+        event_tags_batch = {}
         seen_ids = set()
 
         # Convert date strings to ISO 8601 format for Polymarket API
@@ -579,13 +629,14 @@ class EventSyncService:
                     event_id = event_data.get('id', '')
                     if event_id and event_id not in seen_ids:
                         seen_ids.add(event_id)
-                        self._process_polymarket_event(event_data, events_batch, market_data_batch)
+                        self._process_polymarket_event(event_data, events_batch, market_data_batch, event_tags_batch)
 
                         # Flush if batch is full
                         if len(events_batch) >= BATCH_SIZE:
-                            self._flush_polymarket_batch(events_batch, market_data_batch, total_events)
+                            self._flush_polymarket_batch(events_batch, market_data_batch, total_events, event_tags_batch)
                             events_batch = []
                             market_data_batch = {}
+                            event_tags_batch = {}
 
                 logger.info(f"Fetched page of {len(events)} Polymarket events (offset: {offset})")
 
@@ -596,7 +647,7 @@ class EventSyncService:
 
             # Flush any remaining events
             if events_batch:
-                self._flush_polymarket_batch(events_batch, market_data_batch, total_events)
+                self._flush_polymarket_batch(events_batch, market_data_batch, total_events, event_tags_batch)
 
             logger.info(f"Synced {total_events[0]} Polymarket events total")
 

@@ -48,27 +48,44 @@
 </div>
 <p class="section-description">Select one event from each exchange and click "Create Match" to manually match them.</p>
 
+<!-- Shared Filters Section -->
+<div class="shared-filters-section">
+    <div class="filter-group">
+        <label>Tags</label>
+        <div class="tags-container" id="tagsContainer">
+            <span class="loading-tags">Loading tags...</span>
+        </div>
+    </div>
+    <div class="filter-group">
+        <label>Volume (24h)</label>
+        <div class="filter-row">
+            <input type="number" id="sharedVolume24hMin" placeholder="Min" class="filter-input">
+            <input type="number" id="sharedVolume24hMax" placeholder="Max" class="filter-input">
+        </div>
+    </div>
+    <div class="filter-group">
+        <label>Liquidity</label>
+        <div class="filter-row">
+            <input type="number" id="sharedLiquidityMin" placeholder="Min" class="filter-input">
+            <input type="number" id="sharedLiquidityMax" placeholder="Max" class="filter-input">
+        </div>
+    </div>
+    <div class="filter-group">
+        <label>End Date</label>
+        <div class="filter-row">
+            <input type="date" id="sharedEndDateAfter" class="filter-input" title="After">
+            <input type="date" id="sharedEndDateBefore" class="filter-input" title="Before">
+        </div>
+    </div>
+    <div class="filter-actions">
+        <button class="btn-small" onclick="clearSharedFilters()">Clear All Filters</button>
+    </div>
+</div>
+
 <div class="events-display">
     <div class="events-column">
         <h3>Kalshi Events (<span id="kalshiCount">{{ kalshi_event_count }}</span>)</h3>
         <input type="text" id="kalshiEventSearch" placeholder="Search Kalshi events..." class="search-input">
-        <div class="filter-section">
-            <div class="filter-row">
-                <input type="number" id="kalshiVolume24hMin" placeholder="Min 24h Vol" class="filter-input">
-                <input type="number" id="kalshiVolume24hMax" placeholder="Max 24h Vol" class="filter-input">
-            </div>
-            <div class="filter-row">
-                <input type="number" id="kalshiLiquidityMin" placeholder="Min Liquidity" class="filter-input">
-                <input type="number" id="kalshiLiquidityMax" placeholder="Max Liquidity" class="filter-input">
-            </div>
-            <div class="filter-row">
-                <input type="date" id="kalshiEndDateAfter" class="filter-input" title="End After">
-                <input type="date" id="kalshiEndDateBefore" class="filter-input" title="End Before">
-            </div>
-            <div class="filter-actions">
-                <button class="btn-small" onclick="clearFilters('kalshi')">Clear</button>
-            </div>
-        </div>
         <div class="events-list" id="kalshiEventsList">
             {% for event in kalshi_events %}
             <div class="event-item" data-id="{{ event.id }}" onclick="selectEvent(this, 'kalshi')">
@@ -95,23 +112,6 @@
     <div class="events-column">
         <h3>Polymarket Events (<span id="polymarketCount">{{ poly_event_count }}</span>)</h3>
         <input type="text" id="polymarketEventSearch" placeholder="Search Polymarket events..." class="search-input">
-        <div class="filter-section">
-            <div class="filter-row">
-                <input type="number" id="polymarketVolume24hMin" placeholder="Min 24h Vol" class="filter-input">
-                <input type="number" id="polymarketVolume24hMax" placeholder="Max 24h Vol" class="filter-input">
-            </div>
-            <div class="filter-row">
-                <input type="number" id="polymarketLiquidityMin" placeholder="Min Liquidity" class="filter-input">
-                <input type="number" id="polymarketLiquidityMax" placeholder="Max Liquidity" class="filter-input">
-            </div>
-            <div class="filter-row">
-                <input type="date" id="polymarketEndDateAfter" class="filter-input" title="End After">
-                <input type="date" id="polymarketEndDateBefore" class="filter-input" title="End Before">
-            </div>
-            <div class="filter-actions">
-                <button class="btn-small" onclick="clearFilters('polymarket')">Clear</button>
-            </div>
-        </div>
         <div class="events-list" id="polymarketEventsList">
             {% for event in poly_events %}
             <div class="event-item" data-id="{{ event.id }}" onclick="selectEvent(this, 'polymarket')">
@@ -336,27 +336,85 @@
         font-style: italic;
     }
 
-    .filter-section {
+    .shared-filters-section {
+        background: #1a1a1a;
+        border-radius: 8px;
+        padding: 16px;
+        margin-bottom: 20px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        align-items: flex-start;
+    }
+
+    .filter-group {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .filter-group label {
+        font-size: 12px;
+        color: #888;
+        font-weight: 500;
+    }
+
+    .tags-container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        max-width: 600px;
+    }
+
+    .tag-chip {
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 10px;
         background: #2a2a2a;
-        border-radius: 6px;
-        padding: 10px;
-        margin-bottom: 12px;
+        border: 1px solid #444;
+        border-radius: 16px;
+        font-size: 12px;
+        color: #ccc;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .tag-chip:hover {
+        background: #333;
+        border-color: #555;
+    }
+
+    .tag-chip.selected {
+        background: #1a4a1a;
+        border-color: #22c55e;
+        color: #22c55e;
+    }
+
+    .tag-chip .tag-count {
+        margin-left: 4px;
+        color: #666;
+        font-size: 11px;
+    }
+
+    .tag-chip.selected .tag-count {
+        color: #4ade80;
+    }
+
+    .loading-tags {
+        color: #666;
+        font-size: 12px;
+        font-style: italic;
     }
 
     .filter-row {
         display: flex;
         gap: 8px;
-        margin-bottom: 8px;
-    }
-
-    .filter-row:last-of-type {
-        margin-bottom: 8px;
     }
 
     .filter-input {
-        flex: 1;
+        width: 80px;
         padding: 6px 8px;
-        background: #333;
+        background: #2a2a2a;
         border: 1px solid #444;
         border-radius: 4px;
         color: #fff;
@@ -367,10 +425,14 @@
         color: #666;
     }
 
+    .filter-input[type="date"] {
+        width: 130px;
+    }
+
     .filter-actions {
         display: flex;
-        gap: 8px;
-        justify-content: flex-end;
+        align-items: flex-end;
+        margin-left: auto;
     }
 
     .event-header {
@@ -521,9 +583,10 @@
     let selectedKalshiEvent = null;
     let selectedPolymarketEvent = null;
     let expandedEvents = new Set();  // Track expanded events
+    let selectedTags = new Set();  // Track selected tags
 
     // Debounce timers for each exchange
-    const debounceTimers = { kalshi: null, polymarket: null };
+    const debounceTimers = { kalshi: null, polymarket: null, shared: null };
     const DEBOUNCE_DELAY = 300;
 
     function sortBy(column) {
@@ -548,32 +611,93 @@
         }, DEBOUNCE_DELAY);
     }
 
+    // Debounced filter function for shared filters
+    function debouncedApplyAllFilters() {
+        if (debounceTimers.shared) {
+            clearTimeout(debounceTimers.shared);
+        }
+        debounceTimers.shared = setTimeout(() => {
+            applyFilters('kalshi');
+            applyFilters('polymarket');
+        }, DEBOUNCE_DELAY);
+    }
+
+    // Load tags from API
+    async function loadTags() {
+        try {
+            const response = await fetch('/api/tags/');
+            const data = await response.json();
+
+            if (data.success) {
+                renderTags(data.tags);
+            } else {
+                document.getElementById('tagsContainer').innerHTML = '<span class="loading-tags">No tags available</span>';
+            }
+        } catch (e) {
+            document.getElementById('tagsContainer').innerHTML = '<span class="loading-tags">Failed to load tags</span>';
+        }
+    }
+
+    // Render tags as clickable chips
+    function renderTags(tags) {
+        const container = document.getElementById('tagsContainer');
+        if (tags.length === 0) {
+            container.innerHTML = '<span class="loading-tags">No tags available</span>';
+            return;
+        }
+
+        container.innerHTML = tags.map(tag => `
+            <span class="tag-chip" data-tag="${tag.name}" onclick="toggleTag('${tag.name}')">
+                ${tag.display_name}
+                <span class="tag-count">(${tag.event_count})</span>
+            </span>
+        `).join('');
+    }
+
+    // Toggle tag selection
+    function toggleTag(tagName) {
+        const chip = document.querySelector(`.tag-chip[data-tag="${tagName}"]`);
+        if (selectedTags.has(tagName)) {
+            selectedTags.delete(tagName);
+            chip.classList.remove('selected');
+        } else {
+            selectedTags.add(tagName);
+            chip.classList.add('selected');
+        }
+        // Apply filters to both exchanges
+        applyFilters('kalshi');
+        applyFilters('polymarket');
+    }
+
     // Setup live search listeners on page load
     document.addEventListener('DOMContentLoaded', function() {
+        // Load available tags
+        loadTags();
+
         // Fetch events with markets on initial load
         applyFilters('kalshi');
         applyFilters('polymarket');
 
-        // Search inputs
+        // Search inputs (per exchange)
         ['kalshi', 'polymarket'].forEach(exchange => {
             const searchInput = document.getElementById(`${exchange}EventSearch`);
             if (searchInput) {
                 searchInput.addEventListener('input', () => debouncedApplyFilters(exchange));
             }
+        });
 
-            // Filter inputs - trigger on change for numeric/date inputs
-            const filterIds = [
-                `${exchange}Volume24hMin`, `${exchange}Volume24hMax`,
-                `${exchange}LiquidityMin`, `${exchange}LiquidityMax`,
-                `${exchange}EndDateAfter`, `${exchange}EndDateBefore`
-            ];
-            filterIds.forEach(id => {
-                const input = document.getElementById(id);
-                if (input) {
-                    input.addEventListener('change', () => debouncedApplyFilters(exchange));
-                    input.addEventListener('input', () => debouncedApplyFilters(exchange));
-                }
-            });
+        // Shared filter inputs - trigger on change and input
+        const sharedFilterIds = [
+            'sharedVolume24hMin', 'sharedVolume24hMax',
+            'sharedLiquidityMin', 'sharedLiquidityMax',
+            'sharedEndDateAfter', 'sharedEndDateBefore'
+        ];
+        sharedFilterIds.forEach(id => {
+            const input = document.getElementById(id);
+            if (input) {
+                input.addEventListener('change', debouncedApplyAllFilters);
+                input.addEventListener('input', debouncedApplyAllFilters);
+            }
         });
     });
 
@@ -717,12 +841,14 @@
     }
 
     // Render events list
-    function renderEventsList(exchange, events) {
+    function renderEventsList(exchange, events, totalCount) {
         const listId = exchange === 'kalshi' ? 'kalshiEventsList' : 'polymarketEventsList';
         const countId = exchange === 'kalshi' ? 'kalshiCount' : 'polymarketCount';
         const eventsList = document.getElementById(listId);
 
-        document.getElementById(countId).textContent = events.length;
+        // Show total count if available, otherwise show returned count
+        const displayCount = totalCount !== undefined ? totalCount : events.length;
+        document.getElementById(countId).textContent = displayCount;
 
         if (events.length === 0) {
             eventsList.innerHTML = '<p class="no-events">No events found matching your filters.</p>';
@@ -787,13 +913,13 @@
         const search = searchInput.value.trim();
         if (search) params.append('search', search);
 
-        // Get filter values
-        const volume24hMin = document.getElementById(`${exchange}Volume24hMin`).value;
-        const volume24hMax = document.getElementById(`${exchange}Volume24hMax`).value;
-        const liquidityMin = document.getElementById(`${exchange}LiquidityMin`).value;
-        const liquidityMax = document.getElementById(`${exchange}LiquidityMax`).value;
-        const endDateAfter = document.getElementById(`${exchange}EndDateAfter`).value;
-        const endDateBefore = document.getElementById(`${exchange}EndDateBefore`).value;
+        // Get shared filter values
+        const volume24hMin = document.getElementById('sharedVolume24hMin').value;
+        const volume24hMax = document.getElementById('sharedVolume24hMax').value;
+        const liquidityMin = document.getElementById('sharedLiquidityMin').value;
+        const liquidityMax = document.getElementById('sharedLiquidityMax').value;
+        const endDateAfter = document.getElementById('sharedEndDateAfter').value;
+        const endDateBefore = document.getElementById('sharedEndDateBefore').value;
 
         if (volume24hMin) params.append('volume_24h_min', volume24hMin);
         if (volume24hMax) params.append('volume_24h_max', volume24hMax);
@@ -802,12 +928,17 @@
         if (endDateAfter) params.append('end_date_after', endDateAfter);
         if (endDateBefore) params.append('end_date_before', endDateBefore);
 
+        // Add selected tags
+        selectedTags.forEach(tag => {
+            params.append('tags', tag);
+        });
+
         try {
             const response = await fetch(`/api/events/?${params.toString()}`);
             const data = await response.json();
 
             if (data.success) {
-                renderEventsList(exchange, data.events);
+                renderEventsList(exchange, data.events, data.total_count);
             } else {
                 showToast('Error: ' + data.error, 'error');
             }
@@ -816,16 +947,34 @@
         }
     }
 
-    // Clear filters for an exchange
+    // Clear search for an exchange
     function clearFilters(exchange) {
         document.getElementById(`${exchange}EventSearch`).value = '';
-        document.getElementById(`${exchange}Volume24hMin`).value = '';
-        document.getElementById(`${exchange}Volume24hMax`).value = '';
-        document.getElementById(`${exchange}LiquidityMin`).value = '';
-        document.getElementById(`${exchange}LiquidityMax`).value = '';
-        document.getElementById(`${exchange}EndDateAfter`).value = '';
-        document.getElementById(`${exchange}EndDateBefore`).value = '';
         applyFilters(exchange);
+    }
+
+    // Clear all shared filters
+    function clearSharedFilters() {
+        document.getElementById('sharedVolume24hMin').value = '';
+        document.getElementById('sharedVolume24hMax').value = '';
+        document.getElementById('sharedLiquidityMin').value = '';
+        document.getElementById('sharedLiquidityMax').value = '';
+        document.getElementById('sharedEndDateAfter').value = '';
+        document.getElementById('sharedEndDateBefore').value = '';
+
+        // Clear selected tags
+        selectedTags.clear();
+        document.querySelectorAll('.tag-chip.selected').forEach(chip => {
+            chip.classList.remove('selected');
+        });
+
+        // Also clear search inputs
+        document.getElementById('kalshiEventSearch').value = '';
+        document.getElementById('polymarketEventSearch').value = '';
+
+        // Refresh both exchanges
+        applyFilters('kalshi');
+        applyFilters('polymarket');
     }
 
     // Create manual event match

@@ -13,6 +13,9 @@ urlpatterns = [
     # Events API
     path('api/events/', views.get_events, name='get_events'),
 
+    # Tags API
+    path('api/tags/', views.get_tags, name='get_tags'),
+
     # Event matches API (for manual matching)
     path('api/event-matches/create/', views.create_event_match, name='create_event_match'),
     path('api/event-matches/<int:match_id>/delete/', views.delete_event_match, name='delete_event_match'),

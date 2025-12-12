@@ -103,6 +103,32 @@ class Market(models.Model):
         return f"[{self.exchange}] {self.title}"
 
 
+class EventTag(models.Model):
+    """Tag for categorizing events (normalized to lowercase)"""
+    name = models.CharField(max_length=255, unique=True, help_text="Lowercase normalized tag name")
+    display_name = models.CharField(max_length=255, help_text="Original display name")
+    events = models.ManyToManyField(Event, related_name='tags', blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+    @classmethod
+    def get_or_create_normalized(cls, tag_name: str, display_name: str = None):
+        """Get or create a tag with normalized (lowercase) name"""
+        normalized = tag_name.lower().strip()
+        if not normalized:
+            return None
+        tag, _ = cls.objects.get_or_create(
+            name=normalized,
+            defaults={'display_name': display_name or tag_name}
+        )
+        return tag
+
+
 class EventMatch(models.Model):
     """Match between events from different exchanges (cross-exchange event matching)"""
     kalshi_event = models.ForeignKey(

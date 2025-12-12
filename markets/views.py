@@ -8,7 +8,7 @@ from django.utils import timezone
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 from django.db.models import Q, Case, When, IntegerField, Value
 
-from .models import Event, EventMatch, Exchange, Market
+from .models import Event, EventMatch, Exchange, Market, EventTag
 from .services import EventSyncService
 
 
@@ -147,8 +147,13 @@ def get_events(request):
         liquidity_max = request.GET.get('liquidity_max')
         end_date_after = request.GET.get('end_date_after')
         end_date_before = request.GET.get('end_date_before')
+        tags = request.GET.getlist('tags')  # Multiple tags can be passed
 
         events_qs = Event.objects.filter(is_active=True)
+
+        # Tag filter (events must have at least one of the selected tags)
+        if tags:
+            events_qs = events_qs.filter(tags__name__in=tags).distinct()
 
         if exchange:
             events_qs = events_qs.filter(exchange=exchange)
@@ -244,10 +249,14 @@ def get_events(request):
         if include_markets:
             events_qs = events_qs.prefetch_related('markets')
 
+        # Get total count before limiting
+        total_count = events_qs.count()
+
         events_qs = events_qs[:limit]
 
         return JsonResponse({
             'success': True,
+            'total_count': total_count,
             'events': [serialize_event(e, include_exchange=True, include_markets=include_markets) for e in events_qs]
         })
 
@@ -342,3 +351,30 @@ def verify_event_match(request, match_id):
         'is_verified': match.is_verified,
         'verified_at': match.verified_at.isoformat() if match.verified_at else None
     })
+
+
+def get_tags(request):
+    """Get all available tags with event counts"""
+    if request.method != 'GET':
+        return JsonResponse({'error': 'GET required'}, status=405)
+
+    try:
+        from django.db.models import Count
+
+        tags = EventTag.objects.annotate(
+            event_count=Count('events', filter=Q(events__is_active=True))
+        ).filter(event_count__gt=0).order_by('-event_count', 'name')
+
+        return JsonResponse({
+            'success': True,
+            'tags': [
+                {
+                    'name': tag.name,
+                    'display_name': tag.display_name,
+                    'event_count': tag.event_count
+                }
+                for tag in tags
+            ]
+        })
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)}, status=500)
