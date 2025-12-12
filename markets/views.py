@@ -6,13 +6,31 @@ from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from django.utils import timezone
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
-from django.db.models import Q
+from django.db.models import Q, Case, When, IntegerField, Value
 
-from .models import Event, EventMatch, Exchange
+from .models import Event, EventMatch, Exchange, Market
 from .services import EventSyncService
 
 
-def serialize_event(event, include_exchange=False):
+def serialize_market(market):
+    """Serialize a Market model instance to a dictionary"""
+    return {
+        'id': market.id,
+        'external_id': market.external_id,
+        'title': market.title,
+        'description': market.description,
+        'outcomes': market.outcomes,
+        'url': market.url,
+        'volume': market.volume,
+        'volume_24h': market.volume_24h,
+        'liquidity': market.liquidity,
+        'open_interest': market.open_interest,
+        'is_active': market.is_active,
+        'close_time': market.close_time.isoformat() if market.close_time else None,
+    }
+
+
+def serialize_event(event, include_exchange=False, include_markets=False):
     """Serialize an Event model instance to a dictionary"""
     data = {
         'id': event.id,
@@ -32,6 +50,8 @@ def serialize_event(event, include_exchange=False):
     }
     if include_exchange:
         data['exchange'] = event.exchange
+    if include_markets:
+        data['markets'] = [serialize_market(m) for m in event.markets.all()]
     return data
 
 
@@ -118,6 +138,7 @@ def get_events(request):
         exchange = request.GET.get('exchange')
         search = request.GET.get('search', '').strip()
         limit = int(request.GET.get('limit', 100))
+        include_markets = request.GET.get('include_markets', 'true').lower() == 'true'
 
         # Filter parameters
         volume_24h_min = request.GET.get('volume_24h_min')
@@ -132,8 +153,9 @@ def get_events(request):
         if exchange:
             events_qs = events_qs.filter(exchange=exchange)
 
-        # Text search across all text fields
+        # Text search across all text fields with ranking by match count
         if search:
+            # Filter to events that match at least one field
             events_qs = events_qs.filter(
                 Q(title__icontains=search) |
                 Q(description__icontains=search) |
@@ -141,6 +163,35 @@ def get_events(request):
                 Q(rules_primary__icontains=search) |
                 Q(rules_secondary__icontains=search) |
                 Q(series_ticker__icontains=search)
+            )
+
+            # Annotate with match count for ranking
+            events_qs = events_qs.annotate(
+                match_score=Case(
+                    When(title__icontains=search, then=Value(10)),  # Title match is most important
+                    default=Value(0),
+                    output_field=IntegerField()
+                ) + Case(
+                    When(sub_title__icontains=search, then=Value(5)),
+                    default=Value(0),
+                    output_field=IntegerField()
+                ) + Case(
+                    When(description__icontains=search, then=Value(3)),
+                    default=Value(0),
+                    output_field=IntegerField()
+                ) + Case(
+                    When(rules_primary__icontains=search, then=Value(2)),
+                    default=Value(0),
+                    output_field=IntegerField()
+                ) + Case(
+                    When(rules_secondary__icontains=search, then=Value(1)),
+                    default=Value(0),
+                    output_field=IntegerField()
+                ) + Case(
+                    When(series_ticker__icontains=search, then=Value(1)),
+                    default=Value(0),
+                    output_field=IntegerField()
+                )
             )
 
         # Volume 24h filters
@@ -183,11 +234,21 @@ def get_events(request):
             except ValueError:
                 pass
 
-        events_qs = events_qs.order_by('-updated_at')[:limit]
+        # Order by match score (if searching) then by updated_at
+        if search:
+            events_qs = events_qs.order_by('-match_score', '-updated_at')
+        else:
+            events_qs = events_qs.order_by('-updated_at')
+
+        # Prefetch markets if needed
+        if include_markets:
+            events_qs = events_qs.prefetch_related('markets')
+
+        events_qs = events_qs[:limit]
 
         return JsonResponse({
             'success': True,
-            'events': [serialize_event(e, include_exchange=True) for e in events_qs]
+            'events': [serialize_event(e, include_exchange=True, include_markets=include_markets) for e in events_qs]
         })
 
     except Exception as e:

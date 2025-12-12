@@ -66,7 +66,6 @@
                 <input type="date" id="kalshiEndDateBefore" class="filter-input" title="End Before">
             </div>
             <div class="filter-actions">
-                <button class="btn-small" onclick="applyFilters('kalshi')">Apply</button>
                 <button class="btn-small" onclick="clearFilters('kalshi')">Clear</button>
             </div>
         </div>
@@ -110,7 +109,6 @@
                 <input type="date" id="polymarketEndDateBefore" class="filter-input" title="End Before">
             </div>
             <div class="filter-actions">
-                <button class="btn-small" onclick="applyFilters('polymarket')">Apply</button>
                 <button class="btn-small" onclick="clearFilters('polymarket')">Clear</button>
             </div>
         </div>
@@ -375,6 +373,92 @@
         justify-content: flex-end;
     }
 
+    .event-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 8px;
+    }
+
+    .event-title-area {
+        flex: 1;
+    }
+
+    .expand-btn {
+        width: 24px;
+        height: 24px;
+        padding: 0;
+        background: #333;
+        border: 1px solid #444;
+        border-radius: 4px;
+        color: #fff;
+        cursor: pointer;
+        font-size: 16px;
+        line-height: 1;
+        flex-shrink: 0;
+    }
+
+    .expand-btn:hover {
+        background: #444;
+    }
+
+    .market-count {
+        color: #60a5fa;
+        font-weight: 500;
+    }
+
+    .markets-container {
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid #333;
+    }
+
+    .market-item {
+        background: #1a1a1a;
+        border-radius: 4px;
+        padding: 8px 10px;
+        margin-bottom: 6px;
+    }
+
+    .market-item:last-child {
+        margin-bottom: 0;
+    }
+
+    .market-title {
+        font-size: 12px;
+        color: #ccc;
+        margin-bottom: 4px;
+    }
+
+    .market-outcomes {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 6px;
+    }
+
+    .outcome {
+        background: #2a2a2a;
+        padding: 2px 8px;
+        border-radius: 3px;
+        font-size: 11px;
+        color: #22c55e;
+    }
+
+    .market-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        font-size: 11px;
+        color: #666;
+    }
+
+    .no-markets {
+        color: #666;
+        font-size: 12px;
+        font-style: italic;
+    }
+
     .manual-event-match-section {
         display: flex;
         align-items: center;
@@ -436,6 +520,11 @@
     const currentSort = '{{ current_sort }}';
     let selectedKalshiEvent = null;
     let selectedPolymarketEvent = null;
+    let expandedEvents = new Set();  // Track expanded events
+
+    // Debounce timers for each exchange
+    const debounceTimers = { kalshi: null, polymarket: null };
+    const DEBOUNCE_DELAY = 300;
 
     function sortBy(column) {
         let newSort = column;
@@ -449,8 +538,48 @@
         window.location.href = '?sort=' + newSort;
     }
 
-    // Event selection
-    function selectEvent(element, exchange) {
+    // Debounced filter function
+    function debouncedApplyFilters(exchange) {
+        if (debounceTimers[exchange]) {
+            clearTimeout(debounceTimers[exchange]);
+        }
+        debounceTimers[exchange] = setTimeout(() => {
+            applyFilters(exchange);
+        }, DEBOUNCE_DELAY);
+    }
+
+    // Setup live search listeners on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        // Search inputs
+        ['kalshi', 'polymarket'].forEach(exchange => {
+            const searchInput = document.getElementById(`${exchange}EventSearch`);
+            if (searchInput) {
+                searchInput.addEventListener('input', () => debouncedApplyFilters(exchange));
+            }
+
+            // Filter inputs - trigger on change for numeric/date inputs
+            const filterIds = [
+                `${exchange}Volume24hMin`, `${exchange}Volume24hMax`,
+                `${exchange}LiquidityMin`, `${exchange}LiquidityMax`,
+                `${exchange}EndDateAfter`, `${exchange}EndDateBefore`
+            ];
+            filterIds.forEach(id => {
+                const input = document.getElementById(id);
+                if (input) {
+                    input.addEventListener('change', () => debouncedApplyFilters(exchange));
+                    input.addEventListener('input', () => debouncedApplyFilters(exchange));
+                }
+            });
+        });
+    });
+
+    // Event selection (on the header area, not expand)
+    function selectEvent(element, exchange, e) {
+        // Don't select if clicking on expand button or link
+        if (e && (e.target.closest('.expand-btn') || e.target.closest('a'))) {
+            return;
+        }
+
         const eventId = element.dataset.id;
 
         if (exchange === 'kalshi') {
@@ -478,6 +607,23 @@
         }
 
         updateEventMatchButton();
+    }
+
+    // Toggle event expansion to show markets
+    function toggleEventExpand(eventId, exchange) {
+        const key = `${exchange}-${eventId}`;
+        const marketsContainer = document.getElementById(`markets-${eventId}`);
+        const expandBtn = document.querySelector(`[data-event-id="${eventId}"] .expand-btn`);
+
+        if (expandedEvents.has(key)) {
+            expandedEvents.delete(key);
+            if (marketsContainer) marketsContainer.style.display = 'none';
+            if (expandBtn) expandBtn.textContent = '+';
+        } else {
+            expandedEvents.add(key);
+            if (marketsContainer) marketsContainer.style.display = 'block';
+            if (expandBtn) expandBtn.textContent = '-';
+        }
     }
 
     function updateEventMatchButton() {
@@ -515,6 +661,51 @@
         return '$' + Math.round(num).toLocaleString();
     }
 
+    // Format price (0-1 range)
+    function formatPrice(price) {
+        if (price === null || price === undefined) return '-';
+        const pct = (parseFloat(price) * 100).toFixed(0);
+        return `${pct}¢`;
+    }
+
+    // Render markets list for an event
+    function renderMarkets(markets, exchange) {
+        if (!markets || markets.length === 0) {
+            return '<div class="no-markets">No markets</div>';
+        }
+
+        return markets.map(market => {
+            // Parse outcomes
+            let outcomes = market.outcomes || [];
+            if (typeof outcomes === 'string') {
+                try { outcomes = JSON.parse(outcomes); } catch(e) { outcomes = []; }
+            }
+
+            // Format outcomes display
+            let outcomesHtml = '';
+            if (outcomes.length > 0) {
+                outcomesHtml = outcomes.map(o => {
+                    const name = o.name || o;
+                    const price = o.price !== undefined ? formatPrice(o.price) : '';
+                    return `<span class="outcome">${name}${price ? `: ${price}` : ''}</span>`;
+                }).join('');
+            }
+
+            return `
+                <div class="market-item">
+                    <div class="market-title">${market.title || 'Untitled Market'}</div>
+                    ${outcomesHtml ? `<div class="market-outcomes">${outcomesHtml}</div>` : ''}
+                    <div class="market-meta">
+                        <span>Vol: ${formatCurrency(market.volume)}</span>
+                        <span>24h: ${formatCurrency(market.volume_24h)}</span>
+                        <span>Liq: ${formatCurrency(market.liquidity)}</span>
+                        ${market.close_time ? `<span>Closes: ${market.close_time.slice(0, 10)}</span>` : ''}
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
     // Render events list
     function renderEventsList(exchange, events) {
         const listId = exchange === 'kalshi' ? 'kalshiEventsList' : 'polymarketEventsList';
@@ -528,22 +719,41 @@
             return;
         }
 
-        eventsList.innerHTML = events.map(event => `
-            <div class="event-item" data-id="${event.id}" onclick="selectEvent(this, '${exchange}')">
-                <div class="event-title">
-                    ${event.url
-                        ? `<a href="${event.url}" target="_blank" onclick="event.stopPropagation()">${event.title}</a>`
-                        : event.title}
+        eventsList.innerHTML = events.map(event => {
+            const key = `${exchange}-${event.id}`;
+            const isExpanded = expandedEvents.has(key);
+            const hasMarkets = event.markets && event.markets.length > 0;
+
+            return `
+                <div class="event-item" data-id="${event.id}" data-event-id="${event.id}" onclick="selectEvent(this, '${exchange}', event)">
+                    <div class="event-header">
+                        <div class="event-title-area">
+                            <div class="event-title">
+                                ${event.url
+                                    ? `<a href="${event.url}" target="_blank" onclick="event.stopPropagation()">${event.title}</a>`
+                                    : event.title}
+                            </div>
+                            ${event.sub_title ? `<div class="event-subtitle">${event.sub_title}</div>` : ''}
+                        </div>
+                        ${hasMarkets ? `
+                            <button class="expand-btn" onclick="event.stopPropagation(); toggleEventExpand(${event.id}, '${exchange}')">${isExpanded ? '-' : '+'}</button>
+                        ` : ''}
+                    </div>
+                    ${event.rules_primary ? `<div class="event-rules">${truncateText(event.rules_primary, 150)}</div>` : ''}
+                    <div class="event-meta">
+                        <span>24h Vol: ${formatCurrency(event.volume_24h)}</span>
+                        <span>Liq: ${formatCurrency(event.liquidity)}</span>
+                        ${event.end_date ? `<span>Ends: ${event.end_date.slice(0, 10)}</span>` : ''}
+                        ${hasMarkets ? `<span class="market-count">${event.markets.length} market${event.markets.length !== 1 ? 's' : ''}</span>` : ''}
+                    </div>
+                    ${hasMarkets ? `
+                        <div class="markets-container" id="markets-${event.id}" style="display: ${isExpanded ? 'block' : 'none'}">
+                            ${renderMarkets(event.markets, exchange)}
+                        </div>
+                    ` : ''}
                 </div>
-                ${event.sub_title ? `<div class="event-subtitle">${event.sub_title}</div>` : ''}
-                ${event.rules_primary ? `<div class="event-rules">${truncateText(event.rules_primary, 150)}</div>` : ''}
-                <div class="event-meta">
-                    <span>24h Vol: ${formatCurrency(event.volume_24h)}</span>
-                    <span>Liq: ${formatCurrency(event.liquidity)}</span>
-                    ${event.end_date ? `<span>Ends: ${event.end_date.slice(0, 10)}</span>` : ''}
-                </div>
-            </div>
-        `).join('');
+            `;
+        }).join('');
 
         // Re-select previously selected event if still in list
         if (exchange === 'kalshi' && selectedKalshiEvent) {
@@ -562,6 +772,7 @@
 
         params.append('exchange', exchange);
         params.append('limit', '100');
+        params.append('include_markets', 'true');
 
         const search = searchInput.value.trim();
         if (search) params.append('search', search);
