@@ -50,10 +50,16 @@
 
 <!-- Shared Filters Section -->
 <div class="shared-filters-section">
-    <div class="filter-group">
-        <label>Tags</label>
-        <div class="tags-container" id="tagsContainer">
-            <span class="loading-tags">Loading tags...</span>
+    <div class="filter-group tags-filter-group">
+        <label>Tags <span id="tagCountInfo" class="tag-count-info"></span></label>
+        <input type="text" id="tagSearch" placeholder="Search tags..." class="tag-search-input">
+        <div class="tags-wrapper">
+            <div class="tags-container" id="tagsContainer">
+                <span class="loading-tags">Loading tags...</span>
+            </div>
+            <button class="show-more-tags-btn" id="showMoreTagsBtn" style="display: none;" onclick="toggleShowAllTags()">
+                Show more
+            </button>
         </div>
     </div>
     <div class="filter-group">
@@ -359,11 +365,49 @@
         font-weight: 500;
     }
 
+    .tags-filter-group {
+        flex: 1;
+        min-width: 300px;
+        max-width: 100%;
+    }
+
+    .tag-search-input {
+        width: 200px;
+        padding: 6px 10px;
+        background: #2a2a2a;
+        border: 1px solid #444;
+        border-radius: 4px;
+        color: #fff;
+        font-size: 12px;
+        margin-bottom: 8px;
+    }
+
+    .tag-search-input::placeholder {
+        color: #666;
+    }
+
+    .tag-count-info {
+        color: #666;
+        font-weight: normal;
+        font-size: 11px;
+    }
+
+    .tags-wrapper {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+
     .tags-container {
         display: flex;
         flex-wrap: wrap;
         gap: 6px;
-        max-width: 600px;
+        max-height: 80px;
+        overflow: hidden;
+    }
+
+    .tags-container.expanded {
+        max-height: none;
     }
 
     .tag-chip {
@@ -384,6 +428,17 @@
         border-color: #555;
     }
 
+    .tag-chip.has-both {
+        background: #1a3a1a;
+        border-color: #2d5a2d;
+        color: #4ade80;
+    }
+
+    .tag-chip.has-both:hover {
+        background: #1f4a1f;
+        border-color: #3a6a3a;
+    }
+
     .tag-chip.selected {
         background: #1a4a1a;
         border-color: #22c55e;
@@ -396,8 +451,28 @@
         font-size: 11px;
     }
 
+    .tag-chip.has-both .tag-count {
+        color: #4ade80;
+    }
+
     .tag-chip.selected .tag-count {
         color: #4ade80;
+    }
+
+    .show-more-tags-btn {
+        align-self: flex-start;
+        padding: 4px 12px;
+        background: #333;
+        border: 1px solid #444;
+        border-radius: 4px;
+        color: #888;
+        font-size: 11px;
+        cursor: pointer;
+    }
+
+    .show-more-tags-btn:hover {
+        background: #444;
+        color: #ccc;
     }
 
     .loading-tags {
@@ -584,9 +659,12 @@
     let selectedPolymarketEvent = null;
     let expandedEvents = new Set();  // Track expanded events
     let selectedTags = new Set();  // Track selected tags
+    let allTags = [];  // Store all tags for filtering
+    let showAllTags = false;  // Track if all tags are shown
+    const MAX_VISIBLE_TAGS = 15;  // Default number of tags to show
 
     // Debounce timers for each exchange
-    const debounceTimers = { kalshi: null, polymarket: null, shared: null };
+    const debounceTimers = { kalshi: null, polymarket: null, shared: null, tagSearch: null };
     const DEBOUNCE_DELAY = 300;
 
     function sortBy(column) {
@@ -629,7 +707,8 @@
             const data = await response.json();
 
             if (data.success) {
-                renderTags(data.tags);
+                allTags = data.tags;
+                renderTags();
             } else {
                 document.getElementById('tagsContainer').innerHTML = '<span class="loading-tags">No tags available</span>';
             }
@@ -638,32 +717,92 @@
         }
     }
 
-    // Render tags as clickable chips
-    function renderTags(tags) {
+    // Filter and render tags
+    function renderTags() {
         const container = document.getElementById('tagsContainer');
-        if (tags.length === 0) {
-            container.innerHTML = '<span class="loading-tags">No tags available</span>';
+        const showMoreBtn = document.getElementById('showMoreTagsBtn');
+        const tagCountInfo = document.getElementById('tagCountInfo');
+        const searchQuery = (document.getElementById('tagSearch')?.value || '').toLowerCase().trim();
+
+        // Filter tags by search
+        let filteredTags = allTags;
+        if (searchQuery) {
+            filteredTags = allTags.filter(tag =>
+                tag.name.includes(searchQuery) ||
+                tag.display_name.toLowerCase().includes(searchQuery)
+            );
+        }
+
+        if (filteredTags.length === 0) {
+            container.innerHTML = '<span class="loading-tags">No tags found</span>';
+            showMoreBtn.style.display = 'none';
+            tagCountInfo.textContent = '';
             return;
         }
 
-        container.innerHTML = tags.map(tag => `
-            <span class="tag-chip" data-tag="${tag.name}" onclick="toggleTag('${tag.name}')">
-                ${tag.display_name}
-                <span class="tag-count">(${tag.event_count})</span>
-            </span>
-        `).join('');
+        // Count tags with both exchanges
+        const bothCount = filteredTags.filter(t => t.has_both).length;
+        tagCountInfo.textContent = bothCount > 0 ? `(${bothCount} shared)` : '';
+
+        // Determine which tags to show
+        const tagsToShow = showAllTags || searchQuery ? filteredTags : filteredTags.slice(0, MAX_VISIBLE_TAGS);
+        const hasMore = !searchQuery && filteredTags.length > MAX_VISIBLE_TAGS;
+
+        container.innerHTML = tagsToShow.map(tag => {
+            const isSelected = selectedTags.has(tag.name);
+            const classes = ['tag-chip'];
+            if (tag.has_both) classes.push('has-both');
+            if (isSelected) classes.push('selected');
+
+            return `
+                <span class="${classes.join(' ')}" data-tag="${tag.name}" onclick="toggleTag('${tag.name}')">
+                    ${tag.display_name}
+                    <span class="tag-count">(${tag.event_count})</span>
+                </span>
+            `;
+        }).join('');
+
+        // Show/hide "Show more" button
+        if (hasMore) {
+            showMoreBtn.style.display = 'inline-block';
+            showMoreBtn.textContent = showAllTags ? `Show less` : `Show ${filteredTags.length - MAX_VISIBLE_TAGS} more`;
+        } else {
+            showMoreBtn.style.display = 'none';
+        }
+
+        // Toggle container expansion
+        if (showAllTags || searchQuery) {
+            container.classList.add('expanded');
+        } else {
+            container.classList.remove('expanded');
+        }
+    }
+
+    // Toggle show all tags
+    function toggleShowAllTags() {
+        showAllTags = !showAllTags;
+        renderTags();
+    }
+
+    // Debounced tag search
+    function debouncedTagSearch() {
+        if (debounceTimers.tagSearch) {
+            clearTimeout(debounceTimers.tagSearch);
+        }
+        debounceTimers.tagSearch = setTimeout(() => {
+            renderTags();
+        }, DEBOUNCE_DELAY);
     }
 
     // Toggle tag selection
     function toggleTag(tagName) {
-        const chip = document.querySelector(`.tag-chip[data-tag="${tagName}"]`);
         if (selectedTags.has(tagName)) {
             selectedTags.delete(tagName);
-            chip.classList.remove('selected');
         } else {
             selectedTags.add(tagName);
-            chip.classList.add('selected');
         }
+        // Re-render tags to update selected state
+        renderTags();
         // Apply filters to both exchanges
         applyFilters('kalshi');
         applyFilters('polymarket');
@@ -677,6 +816,12 @@
         // Fetch events with markets on initial load
         applyFilters('kalshi');
         applyFilters('polymarket');
+
+        // Tag search input
+        const tagSearchInput = document.getElementById('tagSearch');
+        if (tagSearchInput) {
+            tagSearchInput.addEventListener('input', debouncedTagSearch);
+        }
 
         // Search inputs (per exchange)
         ['kalshi', 'polymarket'].forEach(exchange => {
@@ -962,11 +1107,11 @@
         document.getElementById('sharedEndDateAfter').value = '';
         document.getElementById('sharedEndDateBefore').value = '';
 
-        // Clear selected tags
+        // Clear tag search and selected tags
+        document.getElementById('tagSearch').value = '';
         selectedTags.clear();
-        document.querySelectorAll('.tag-chip.selected').forEach(chip => {
-            chip.classList.remove('selected');
-        });
+        showAllTags = false;
+        renderTags();
 
         // Also clear search inputs
         document.getElementById('kalshiEventSearch').value = '';

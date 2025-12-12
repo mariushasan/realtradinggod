@@ -354,7 +354,7 @@ def verify_event_match(request, match_id):
 
 
 def get_tags(request):
-    """Get all available tags with event counts"""
+    """Get all available tags with event counts per exchange"""
     if request.method != 'GET':
         return JsonResponse({'error': 'GET required'}, status=405)
 
@@ -362,8 +362,16 @@ def get_tags(request):
         from django.db.models import Count
 
         tags = EventTag.objects.annotate(
-            event_count=Count('events', filter=Q(events__is_active=True))
-        ).filter(event_count__gt=0).order_by('-event_count', 'name')
+            event_count=Count('events', filter=Q(events__is_active=True)),
+            kalshi_count=Count('events', filter=Q(events__is_active=True, events__exchange='kalshi')),
+            polymarket_count=Count('events', filter=Q(events__is_active=True, events__exchange='polymarket'))
+        ).filter(event_count__gt=0)
+
+        # Sort: tags with both exchanges first, then by total count
+        tags = sorted(tags, key=lambda t: (
+            0 if (t.kalshi_count > 0 and t.polymarket_count > 0) else 1,
+            -t.event_count
+        ))
 
         return JsonResponse({
             'success': True,
@@ -371,7 +379,10 @@ def get_tags(request):
                 {
                     'name': tag.name,
                     'display_name': tag.display_name,
-                    'event_count': tag.event_count
+                    'event_count': tag.event_count,
+                    'kalshi_count': tag.kalshi_count,
+                    'polymarket_count': tag.polymarket_count,
+                    'has_both': tag.kalshi_count > 0 and tag.polymarket_count > 0
                 }
                 for tag in tags
             ]
