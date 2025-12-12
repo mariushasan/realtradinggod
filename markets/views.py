@@ -18,8 +18,14 @@ def serialize_event(event, include_exchange=False):
         'id': event.id,
         'external_id': event.external_id,
         'title': event.title,
+        'sub_title': event.sub_title,
+        'rules_primary': event.rules_primary,
+        'rules_secondary': event.rules_secondary,
+        'resolution_source': event.resolution_source,
+        'series_ticker': event.series_ticker,
         'url': event.url,
         'volume': event.volume,
+        'volume_24h': event.volume_24h,
         'liquidity': event.liquidity,
         'category': event.category,
         'end_date': event.end_date.isoformat() if event.end_date else None,
@@ -104,7 +110,7 @@ def sync_events(request):
 
 @csrf_exempt
 def get_events(request):
-    """Get events from database with optional search"""
+    """Get events from database with optional search and filters"""
     if request.method != 'GET':
         return JsonResponse({'error': 'GET required'}, status=405)
 
@@ -113,13 +119,69 @@ def get_events(request):
         search = request.GET.get('search', '').strip()
         limit = int(request.GET.get('limit', 100))
 
+        # Filter parameters
+        volume_24h_min = request.GET.get('volume_24h_min')
+        volume_24h_max = request.GET.get('volume_24h_max')
+        liquidity_min = request.GET.get('liquidity_min')
+        liquidity_max = request.GET.get('liquidity_max')
+        end_date_after = request.GET.get('end_date_after')
+        end_date_before = request.GET.get('end_date_before')
+
         events_qs = Event.objects.filter(is_active=True)
 
         if exchange:
             events_qs = events_qs.filter(exchange=exchange)
 
+        # Text search across all text fields
         if search:
-            events_qs = events_qs.filter(Q(title__icontains=search) | Q(description__icontains=search))
+            events_qs = events_qs.filter(
+                Q(title__icontains=search) |
+                Q(description__icontains=search) |
+                Q(sub_title__icontains=search) |
+                Q(rules_primary__icontains=search) |
+                Q(rules_secondary__icontains=search) |
+                Q(series_ticker__icontains=search)
+            )
+
+        # Volume 24h filters
+        if volume_24h_min:
+            try:
+                events_qs = events_qs.filter(volume_24h__gte=float(volume_24h_min))
+            except ValueError:
+                pass
+        if volume_24h_max:
+            try:
+                events_qs = events_qs.filter(volume_24h__lte=float(volume_24h_max))
+            except ValueError:
+                pass
+
+        # Liquidity filters
+        if liquidity_min:
+            try:
+                events_qs = events_qs.filter(liquidity__gte=float(liquidity_min))
+            except ValueError:
+                pass
+        if liquidity_max:
+            try:
+                events_qs = events_qs.filter(liquidity__lte=float(liquidity_max))
+            except ValueError:
+                pass
+
+        # End date filters
+        if end_date_after:
+            try:
+                from datetime import datetime
+                dt = datetime.strptime(end_date_after, '%Y-%m-%d')
+                events_qs = events_qs.filter(end_date__gte=dt)
+            except ValueError:
+                pass
+        if end_date_before:
+            try:
+                from datetime import datetime
+                dt = datetime.strptime(end_date_before, '%Y-%m-%d')
+                events_qs = events_qs.filter(end_date__lte=dt)
+            except ValueError:
+                pass
 
         events_qs = events_qs.order_by('-updated_at')[:limit]
 

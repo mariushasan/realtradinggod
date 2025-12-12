@@ -39,7 +39,9 @@ class EventSyncService:
             update_fields=[
                 'title', 'description', 'category', 'url', 'raw_data',
                 'volume', 'volume_24h', 'liquidity', 'open_interest',
-                'is_active', 'mutually_exclusive', 'end_date'
+                'is_active', 'mutually_exclusive', 'end_date',
+                'sub_title', 'rules_primary', 'rules_secondary',
+                'resolution_source', 'series_ticker'
             ]
         )
 
@@ -191,6 +193,11 @@ class EventSyncService:
         total_liquidity = sum(m.get('liquidity', 0) or 0 for m in markets)
         total_open_interest = sum(m.get('open_interest', 0) or 0 for m in markets)
 
+        # Extract rules from first market
+        first_market = markets[0] if markets else {}
+        rules_primary = first_market.get('rules_primary', '')
+        rules_secondary = first_market.get('rules_secondary', '')
+
         # Create Event object
         events_batch.append(Event(
             exchange=Exchange.KALSHI,
@@ -206,7 +213,12 @@ class EventSyncService:
             open_interest=total_open_interest,
             is_active=True,
             mutually_exclusive=event_data.get('mutually_exclusive', False),
-            end_date=event_close_time
+            end_date=event_close_time,
+            # Resolution/Matching fields
+            sub_title=event_data.get('sub_title', ''),
+            series_ticker=event_data.get('series_ticker', ''),
+            rules_primary=rules_primary,
+            rules_secondary=rules_secondary,
         ))
         # Store market data
         market_data_batch[event_ticker] = {
@@ -461,6 +473,10 @@ class EventSyncService:
             except Exception:
                 pass
 
+        # Extract sports_type from first market if exists
+        polymarket_markets = event_data.get('markets', [])
+        first_market = polymarket_markets[0] if polymarket_markets else {}
+
         # Create Event object
         events_batch.append(Event(
             exchange=Exchange.POLYMARKET,
@@ -476,7 +492,11 @@ class EventSyncService:
             open_interest=float(event_data.get('openInterest', 0) or 0),
             is_active=event_data.get('active', True),
             mutually_exclusive=event_data.get('negRisk', False),
-            end_date=end_date
+            end_date=end_date,
+            # Resolution/Matching fields
+            rules_primary=event_data.get('description', ''),  # Polymarket uses description for rules
+            resolution_source=event_data.get('resolutionSource', ''),
+            series_ticker=event_data.get('seriesSlug', ''),
         ))
 
         # Store market data

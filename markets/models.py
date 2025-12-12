@@ -18,6 +18,13 @@ class Event(models.Model):
     description = models.TextField(blank=True)
     category = models.CharField(max_length=255, blank=True)
 
+    # Resolution/Matching fields
+    sub_title = models.CharField(max_length=500, blank=True)  # Additional context
+    rules_primary = models.TextField(blank=True)              # Primary resolution rules (Kalshi)
+    rules_secondary = models.TextField(blank=True)            # Secondary resolution rules (Kalshi)
+    resolution_source = models.URLField(max_length=500, blank=True)  # Resolution source URL (Polymarket)
+    series_ticker = models.CharField(max_length=255, blank=True)     # Series identifier
+
     # URL for linking to the event
     url = models.URLField(max_length=500, blank=True)
 

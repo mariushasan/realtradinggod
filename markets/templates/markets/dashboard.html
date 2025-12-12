@@ -50,8 +50,26 @@
 
 <div class="events-display">
     <div class="events-column">
-        <h3>Kalshi Events ({{ kalshi_event_count }})</h3>
-        <input type="text" id="kalshiEventSearch" placeholder="Search Kalshi events..." class="search-input" onkeyup="filterEvents('kalshi')">
+        <h3>Kalshi Events (<span id="kalshiCount">{{ kalshi_event_count }}</span>)</h3>
+        <input type="text" id="kalshiEventSearch" placeholder="Search Kalshi events..." class="search-input">
+        <div class="filter-section">
+            <div class="filter-row">
+                <input type="number" id="kalshiVolume24hMin" placeholder="Min 24h Vol" class="filter-input">
+                <input type="number" id="kalshiVolume24hMax" placeholder="Max 24h Vol" class="filter-input">
+            </div>
+            <div class="filter-row">
+                <input type="number" id="kalshiLiquidityMin" placeholder="Min Liquidity" class="filter-input">
+                <input type="number" id="kalshiLiquidityMax" placeholder="Max Liquidity" class="filter-input">
+            </div>
+            <div class="filter-row">
+                <input type="date" id="kalshiEndDateAfter" class="filter-input" title="End After">
+                <input type="date" id="kalshiEndDateBefore" class="filter-input" title="End Before">
+            </div>
+            <div class="filter-actions">
+                <button class="btn-small" onclick="applyFilters('kalshi')">Apply</button>
+                <button class="btn-small" onclick="clearFilters('kalshi')">Clear</button>
+            </div>
+        </div>
         <div class="events-list" id="kalshiEventsList">
             {% for event in kalshi_events %}
             <div class="event-item" data-id="{{ event.id }}" onclick="selectEvent(this, 'kalshi')">
@@ -62,8 +80,11 @@
                         {{ event.title }}
                     {% endif %}
                 </div>
+                {% if event.sub_title %}<div class="event-subtitle">{{ event.sub_title }}</div>{% endif %}
+                {% if event.rules_primary %}<div class="event-rules">{{ event.rules_primary|truncatechars:150 }}</div>{% endif %}
                 <div class="event-meta">
-                    <span>Vol: ${{ event.volume|floatformat:0 }}</span>
+                    <span>24h Vol: ${{ event.volume_24h|floatformat:0 }}</span>
+                    <span>Liq: ${{ event.liquidity|floatformat:0 }}</span>
                     {% if event.end_date %}<span>Ends: {{ event.end_date|slice:":10" }}</span>{% endif %}
                 </div>
             </div>
@@ -73,8 +94,26 @@
         </div>
     </div>
     <div class="events-column">
-        <h3>Polymarket Events ({{ poly_event_count }})</h3>
-        <input type="text" id="polymarketEventSearch" placeholder="Search Polymarket events..." class="search-input" onkeyup="filterEvents('polymarket')">
+        <h3>Polymarket Events (<span id="polymarketCount">{{ poly_event_count }}</span>)</h3>
+        <input type="text" id="polymarketEventSearch" placeholder="Search Polymarket events..." class="search-input">
+        <div class="filter-section">
+            <div class="filter-row">
+                <input type="number" id="polymarketVolume24hMin" placeholder="Min 24h Vol" class="filter-input">
+                <input type="number" id="polymarketVolume24hMax" placeholder="Max 24h Vol" class="filter-input">
+            </div>
+            <div class="filter-row">
+                <input type="number" id="polymarketLiquidityMin" placeholder="Min Liquidity" class="filter-input">
+                <input type="number" id="polymarketLiquidityMax" placeholder="Max Liquidity" class="filter-input">
+            </div>
+            <div class="filter-row">
+                <input type="date" id="polymarketEndDateAfter" class="filter-input" title="End After">
+                <input type="date" id="polymarketEndDateBefore" class="filter-input" title="End Before">
+            </div>
+            <div class="filter-actions">
+                <button class="btn-small" onclick="applyFilters('polymarket')">Apply</button>
+                <button class="btn-small" onclick="clearFilters('polymarket')">Clear</button>
+            </div>
+        </div>
         <div class="events-list" id="polymarketEventsList">
             {% for event in poly_events %}
             <div class="event-item" data-id="{{ event.id }}" onclick="selectEvent(this, 'polymarket')">
@@ -85,8 +124,11 @@
                         {{ event.title }}
                     {% endif %}
                 </div>
+                {% if event.sub_title %}<div class="event-subtitle">{{ event.sub_title }}</div>{% endif %}
+                {% if event.rules_primary %}<div class="event-rules">{{ event.rules_primary|truncatechars:150 }}</div>{% endif %}
                 <div class="event-meta">
-                    <span>Vol: ${{ event.volume|floatformat:0 }}</span>
+                    <span>24h Vol: ${{ event.volume_24h|floatformat:0 }}</span>
+                    <span>Liq: ${{ event.liquidity|floatformat:0 }}</span>
                     {% if event.end_date %}<span>Ends: {{ event.end_date|slice:":10" }}</span>{% endif %}
                 </div>
             </div>
@@ -282,6 +324,57 @@
         color: #666;
     }
 
+    .event-subtitle {
+        font-size: 12px;
+        color: #888;
+        margin-bottom: 4px;
+    }
+
+    .event-rules {
+        font-size: 11px;
+        color: #666;
+        margin-bottom: 6px;
+        line-height: 1.3;
+        font-style: italic;
+    }
+
+    .filter-section {
+        background: #2a2a2a;
+        border-radius: 6px;
+        padding: 10px;
+        margin-bottom: 12px;
+    }
+
+    .filter-row {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 8px;
+    }
+
+    .filter-row:last-of-type {
+        margin-bottom: 8px;
+    }
+
+    .filter-input {
+        flex: 1;
+        padding: 6px 8px;
+        background: #333;
+        border: 1px solid #444;
+        border-radius: 4px;
+        color: #fff;
+        font-size: 12px;
+    }
+
+    .filter-input::placeholder {
+        color: #666;
+    }
+
+    .filter-actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+    }
+
     .manual-event-match-section {
         display: flex;
         align-items: center;
@@ -410,20 +503,108 @@
         }
     }
 
-    // Filter events by search
-    function filterEvents(exchange) {
-        const searchInput = document.getElementById(exchange === 'kalshi' ? 'kalshiEventSearch' : 'polymarketEventSearch');
-        const eventsList = document.getElementById(exchange === 'kalshi' ? 'kalshiEventsList' : 'polymarketEventsList');
-        const searchTerm = searchInput.value.toLowerCase();
+    // Truncate text helper
+    function truncateText(text, maxLength) {
+        if (!text) return '';
+        return text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
+    }
 
-        eventsList.querySelectorAll('.event-item').forEach(item => {
-            const title = item.querySelector('.event-title').textContent.toLowerCase();
-            if (title.includes(searchTerm)) {
-                item.style.display = '';
+    // Format number as currency
+    function formatCurrency(num) {
+        if (num === null || num === undefined) return '$0';
+        return '$' + Math.round(num).toLocaleString();
+    }
+
+    // Render events list
+    function renderEventsList(exchange, events) {
+        const listId = exchange === 'kalshi' ? 'kalshiEventsList' : 'polymarketEventsList';
+        const countId = exchange === 'kalshi' ? 'kalshiCount' : 'polymarketCount';
+        const eventsList = document.getElementById(listId);
+
+        document.getElementById(countId).textContent = events.length;
+
+        if (events.length === 0) {
+            eventsList.innerHTML = '<p class="no-events">No events found matching your filters.</p>';
+            return;
+        }
+
+        eventsList.innerHTML = events.map(event => `
+            <div class="event-item" data-id="${event.id}" onclick="selectEvent(this, '${exchange}')">
+                <div class="event-title">
+                    ${event.url
+                        ? `<a href="${event.url}" target="_blank" onclick="event.stopPropagation()">${event.title}</a>`
+                        : event.title}
+                </div>
+                ${event.sub_title ? `<div class="event-subtitle">${event.sub_title}</div>` : ''}
+                ${event.rules_primary ? `<div class="event-rules">${truncateText(event.rules_primary, 150)}</div>` : ''}
+                <div class="event-meta">
+                    <span>24h Vol: ${formatCurrency(event.volume_24h)}</span>
+                    <span>Liq: ${formatCurrency(event.liquidity)}</span>
+                    ${event.end_date ? `<span>Ends: ${event.end_date.slice(0, 10)}</span>` : ''}
+                </div>
+            </div>
+        `).join('');
+
+        // Re-select previously selected event if still in list
+        if (exchange === 'kalshi' && selectedKalshiEvent) {
+            const el = eventsList.querySelector(`[data-id="${selectedKalshiEvent}"]`);
+            if (el) el.classList.add('selected');
+        } else if (exchange === 'polymarket' && selectedPolymarketEvent) {
+            const el = eventsList.querySelector(`[data-id="${selectedPolymarketEvent}"]`);
+            if (el) el.classList.add('selected');
+        }
+    }
+
+    // Apply filters and fetch events from API
+    async function applyFilters(exchange) {
+        const searchInput = document.getElementById(exchange === 'kalshi' ? 'kalshiEventSearch' : 'polymarketEventSearch');
+        const params = new URLSearchParams();
+
+        params.append('exchange', exchange);
+        params.append('limit', '100');
+
+        const search = searchInput.value.trim();
+        if (search) params.append('search', search);
+
+        // Get filter values
+        const volume24hMin = document.getElementById(`${exchange}Volume24hMin`).value;
+        const volume24hMax = document.getElementById(`${exchange}Volume24hMax`).value;
+        const liquidityMin = document.getElementById(`${exchange}LiquidityMin`).value;
+        const liquidityMax = document.getElementById(`${exchange}LiquidityMax`).value;
+        const endDateAfter = document.getElementById(`${exchange}EndDateAfter`).value;
+        const endDateBefore = document.getElementById(`${exchange}EndDateBefore`).value;
+
+        if (volume24hMin) params.append('volume_24h_min', volume24hMin);
+        if (volume24hMax) params.append('volume_24h_max', volume24hMax);
+        if (liquidityMin) params.append('liquidity_min', liquidityMin);
+        if (liquidityMax) params.append('liquidity_max', liquidityMax);
+        if (endDateAfter) params.append('end_date_after', endDateAfter);
+        if (endDateBefore) params.append('end_date_before', endDateBefore);
+
+        try {
+            const response = await fetch(`/api/events/?${params.toString()}`);
+            const data = await response.json();
+
+            if (data.success) {
+                renderEventsList(exchange, data.events);
             } else {
-                item.style.display = 'none';
+                showToast('Error: ' + data.error, 'error');
             }
-        });
+        } catch (e) {
+            showToast('Network error: ' + e.message, 'error');
+        }
+    }
+
+    // Clear filters for an exchange
+    function clearFilters(exchange) {
+        document.getElementById(`${exchange}EventSearch`).value = '';
+        document.getElementById(`${exchange}Volume24hMin`).value = '';
+        document.getElementById(`${exchange}Volume24hMax`).value = '';
+        document.getElementById(`${exchange}LiquidityMin`).value = '';
+        document.getElementById(`${exchange}LiquidityMax`).value = '';
+        document.getElementById(`${exchange}EndDateAfter`).value = '';
+        document.getElementById(`${exchange}EndDateBefore`).value = '';
+        applyFilters(exchange);
     }
 
     // Create manual event match
