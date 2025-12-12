@@ -165,22 +165,22 @@ def get_events(request):
                 Q(series_ticker__icontains=search)
             )
 
-            # Annotate with match count for ranking
+            # Annotate with match count for ranking (equal weight for all fields)
             events_qs = events_qs.annotate(
                 match_score=Case(
-                    When(title__icontains=search, then=Value(10)),  # Title match is most important
+                    When(title__icontains=search, then=Value(1)),
                     default=Value(0),
                     output_field=IntegerField()
                 ) + Case(
-                    When(sub_title__icontains=search, then=Value(5)),
+                    When(sub_title__icontains=search, then=Value(1)),
                     default=Value(0),
                     output_field=IntegerField()
                 ) + Case(
-                    When(description__icontains=search, then=Value(3)),
+                    When(description__icontains=search, then=Value(1)),
                     default=Value(0),
                     output_field=IntegerField()
                 ) + Case(
-                    When(rules_primary__icontains=search, then=Value(2)),
+                    When(rules_primary__icontains=search, then=Value(1)),
                     default=Value(0),
                     output_field=IntegerField()
                 ) + Case(

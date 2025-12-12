@@ -550,6 +550,10 @@
 
     // Setup live search listeners on page load
     document.addEventListener('DOMContentLoaded', function() {
+        // Fetch events with markets on initial load
+        applyFilters('kalshi');
+        applyFilters('polymarket');
+
         // Search inputs
         ['kalshi', 'polymarket'].forEach(exchange => {
             const searchInput = document.getElementById(`${exchange}EventSearch`);
@@ -681,13 +685,19 @@
                 try { outcomes = JSON.parse(outcomes); } catch(e) { outcomes = []; }
             }
 
-            // Format outcomes display
+            // Format outcomes display with bid/ask
             let outcomesHtml = '';
             if (outcomes.length > 0) {
                 outcomesHtml = outcomes.map(o => {
                     const name = o.name || o;
                     const price = o.price !== undefined ? formatPrice(o.price) : '';
-                    return `<span class="outcome">${name}${price ? `: ${price}` : ''}</span>`;
+                    const bid = o.bid !== undefined ? formatPrice(o.bid) : '';
+                    // Show bid/ask if available
+                    let priceDisplay = price;
+                    if (bid && bid !== price) {
+                        priceDisplay = `${bid}/${price}`;  // bid/ask format
+                    }
+                    return `<span class="outcome">${name}${priceDisplay ? `: ${priceDisplay}` : ''}</span>`;
                 }).join('');
             }
 

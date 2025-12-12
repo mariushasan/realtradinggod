@@ -96,19 +96,32 @@ class EventSyncService:
                 if not ticker:
                     continue
 
-                # Extract prices
-                yes_ask = market_data.get('yes_ask', 0)
-                no_ask = market_data.get('no_ask', 0)
+                # Extract prices (Kalshi uses cents, convert to decimal)
+                yes_ask = market_data.get('yes_ask', 0) or 0
+                yes_bid = market_data.get('yes_bid', 0) or 0
+                no_ask = market_data.get('no_ask', 0) or 0
+                no_bid = market_data.get('no_bid', 0) or 0
+                last_price = market_data.get('last_price', 0) or 0
 
                 # Convert from cents to decimal if needed
-                if yes_ask and yes_ask > 1:
+                if yes_ask > 1:
                     yes_ask = yes_ask / 100
-                if no_ask and no_ask > 1:
+                if yes_bid > 1:
+                    yes_bid = yes_bid / 100
+                if no_ask > 1:
                     no_ask = no_ask / 100
+                if no_bid > 1:
+                    no_bid = no_bid / 100
+                if last_price > 1:
+                    last_price = last_price / 100
+
+                # Use sub_titles for outcome names if available (more specific)
+                yes_name = market_data.get('yes_sub_title', 'Yes') or 'Yes'
+                no_name = market_data.get('no_sub_title', 'No') or 'No'
 
                 outcomes = [
-                    {'name': 'Yes', 'price': yes_ask},
-                    {'name': 'No', 'price': no_ask}
+                    {'name': yes_name, 'price': yes_ask, 'bid': yes_bid},
+                    {'name': no_name, 'price': no_ask, 'bid': no_bid}
                 ]
 
                 # Parse close time
@@ -382,11 +395,17 @@ class EventSyncService:
                     except json.JSONDecodeError:
                         outcome_prices = []
 
+                # Get bid/ask from market data
+                best_bid = float(market_data.get('bestBid', 0) or 0)
+                best_ask = float(market_data.get('bestAsk', 0) or 0)
+
                 for i, name in enumerate(outcome_names):
                     price = float(outcome_prices[i]) if i < len(outcome_prices) else 0
                     outcomes.append({
                         'name': name,
-                        'price': price
+                        'price': price,
+                        'bid': best_bid if i == 0 else (1 - best_ask if best_ask else 0),
+                        'ask': best_ask if i == 0 else (1 - best_bid if best_bid else 0)
                     })
 
                 # Fallback to tokens format
