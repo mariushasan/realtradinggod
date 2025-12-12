@@ -21,6 +21,9 @@ class Event(models.Model):
     # URL for linking to the event
     url = models.URLField(max_length=500, blank=True)
 
+    # Raw API response data
+    raw_data = models.JSONField(default=dict, help_text="Raw API response for this event")
+
     # Trading metrics (aggregated from markets)
     volume = models.FloatField(default=0.0)
     volume_24h = models.FloatField(default=0.0)

@@ -39,7 +39,7 @@ class EventSyncService:
             update_conflicts=True,
             unique_fields=['exchange', 'external_id'],
             update_fields=[
-                'title', 'description', 'category', 'url',
+                'title', 'description', 'category', 'url', 'raw_data',
                 'volume', 'volume_24h', 'liquidity', 'open_interest',
                 'is_active', 'mutually_exclusive', 'end_date'
             ]
@@ -201,6 +201,7 @@ class EventSyncService:
             description=event_data.get('sub_title', ''),
             category=event_data.get('category', ''),
             url=url,
+            raw_data=event_data,
             volume=total_volume,
             volume_24h=total_volume_24h,
             liquidity=total_liquidity,
@@ -470,6 +471,7 @@ class EventSyncService:
             description=event_data.get('description', ''),
             category=event_data.get('category', ''),
             url=url,
+            raw_data=event_data,
             volume=float(event_data.get('volume', 0) or 0),
             volume_24h=float(event_data.get('volume24hr', 0) or 0),
             liquidity=float(event_data.get('liquidity', 0) or 0),
